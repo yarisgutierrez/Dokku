@@ -142,13 +142,11 @@ window shows why next to each one.
 Window tracking on Wayland would need the `zwlr_foreign_toplevel_manager_v1`
 protocol, which labwc and sway provide. It isn't implemented yet.
 
-**Wayland status: experimental.** On the stack I tested (GTK 3.24.52,
-gtk-layer-shell 0.10.1, libwayland 1.26, with labwc 0.20.2 and sway 1.12), GTK3
-layer-shell windows are created and configured but never drawn, so the dock does
-not appear. A short standalone program with no Dokku code shows the same thing
-([docs/wayland-layer-shell-repro.py](docs/wayland-layer-shell-repro.py)). The
-Settings and launcher windows are ordinary windows and work normally. Reports
-and results from other compositor or library versions are welcome.
+**Wayland status: new and lightly tested.** The dock draws and lays out correctly
+under sway (checked in a headless session, bottom edge). Hover popups, clicks,
+drag and drop, and multi-monitor have not been exercised on Wayland yet, and the
+features marked "not yet" above are missing. X11 is the fully tested path. Reports
+from real Wayland sessions are welcome.
 
 ## Usage
 
@@ -188,7 +186,6 @@ properties so compositor rules can target its windows:
 | `lib/themes/` | theme loading |
 | `lib/hotkeys/` | hotkey manager |
 | `tests/` | unit tests (`meson test`) |
-| `docs/` | notes and reproductions |
 | `data/` | desktop files, man page, icons, default theme |
 
 ## Troubleshooting

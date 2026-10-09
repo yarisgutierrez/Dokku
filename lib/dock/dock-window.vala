@@ -263,6 +263,7 @@ namespace Dokku {
                 set_default_size(calculate_dock_length(), base_height);
 
             if (use_layer_shell) {
+                size_layer_shell_surface();
                 apply_layer_shell_anchors();
                 GtkLayerShell.set_exclusive_zone(this, (auto_hide || dodge_hiding) ? 0 : base_height);
             }
@@ -292,6 +293,18 @@ namespace Dokku {
             var mon = display.get_primary_monitor();
             if (mon == null) mon = display.get_monitor(0);
             return mon;
+        }
+
+        // The compositor takes a layer surface's size from the window. A GTK3 window
+        // that has no child widget and is sized only with set_default_size()/resize()
+        // is mapped but never drawn under gtk-layer-shell (the dock paints straight
+        // onto its window), so ask for the size explicitly.
+        private void size_layer_shell_surface() {
+            int length = calculate_dock_length();
+            int w = is_vertical ? base_height : length;
+            int h = is_vertical ? length : base_height;
+            set_size_request(w, h);
+            resize(w, h);
         }
 
         private void apply_layer_shell_anchors() {
@@ -508,10 +521,7 @@ namespace Dokku {
 
             if (use_layer_shell) {
                 GtkLayerShell.set_margin(this, position_to_edge(), dock_margin_bottom - hide_pixels);
-                if (is_vertical)
-                    resize(base_height, dock_length);
-                else
-                    resize(dock_length, base_height);
+                size_layer_shell_surface();
                 return;
             }
 
