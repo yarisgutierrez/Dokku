@@ -333,6 +333,17 @@ namespace Dokku {
             base_height = max_icon + 34;
         }
 
+        // Plugins live as long as the dock, but load_plugins() runs on every reload. Connect
+        // each plugin's signals only the first time, or every reload would add another
+        // handler and each media change would run once per reload.
+        private HashTable<Object, bool> wired_plugins = new HashTable<Object, bool>(direct_hash, direct_equal);
+
+        private bool wire_once(Object plugin) {
+            if (wired_plugins.contains(plugin)) return false;
+            wired_plugins.set(plugin, true);
+            return true;
+        }
+
         private void load_plugins() {
             if (config.get_plugin_enabled("separator")) {
                 var sep = plugin_manager.get_plugin("separator");
@@ -343,10 +354,12 @@ namespace Dokku {
             if (config.get_media_widget() && config.get_plugin_enabled("media-player")) {
                 var media = plugin_manager.get_plugin("media-player") as MediaPlugin;
                 if (media != null) {
-                    media.changed.connect(() => {
-                        update_media_widget(media);
-                        schedule_redraw();
-                    });
+                    if (wire_once(media)) {
+                        media.changed.connect(() => {
+                            update_media_widget(media);
+                            schedule_redraw();
+                        });
+                    }
                     if (media.has_media) {
                         items.append(new DockItem.from_plugin(media));
                     }
@@ -359,7 +372,7 @@ namespace Dokku {
                 var sp = up as ScriptPlugin;
                 if (sp != null && sp.is_widget) {
                     items.append(new DockItem.from_plugin(sp));
-                    sp.updated.connect(() => schedule_redraw());
+                    if (wire_once(sp)) sp.updated.connect(() => schedule_redraw());
                 }
             }
 
@@ -372,11 +385,13 @@ namespace Dokku {
                 var trash = plugin_manager.get_plugin("trash") as TrashPlugin;
                 if (trash != null) {
                     items.append(new DockItem.from_plugin(trash));
-                    trash.changed.connect(() => {
-                        renderer.clear_icon_cache("user-trash");
-                        renderer.clear_icon_cache("user-trash-full");
-                        schedule_redraw();
-                    });
+                    if (wire_once(trash)) {
+                        trash.changed.connect(() => {
+                            renderer.clear_icon_cache("user-trash");
+                            renderer.clear_icon_cache("user-trash-full");
+                            schedule_redraw();
+                        });
+                    }
                 }
             }
         }
