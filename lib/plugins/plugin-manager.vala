@@ -42,16 +42,8 @@ namespace Dokku {
             plugins.set(plugin.id, plugin);
         }
 
-        public void unregister_plugin(string id) {
-            plugins.remove(id);
-        }
-
         public Plugin? get_plugin(string id) {
             return plugins.get(id);
-        }
-
-        public List<weak Plugin> get_all_plugins() {
-            return plugins.get_values();
         }
 
         public List<weak Plugin> get_user_plugins() {
@@ -80,47 +72,6 @@ namespace Dokku {
             }
             warning("Plugin zip had no valid plugin.ini: %s", zip_path);
             return false;
-        }
-
-        public void uninstall_plugin(string id) {
-            var plugin = plugins.get(id) as ScriptPlugin;
-            if (plugin != null && plugin.path != null) {
-                var dir = Path.get_dirname(plugin.path);
-                string? real_dir = Posix.realpath(dir);
-                string? real_base = Posix.realpath(user_plugins_dir);
-                if (real_dir != null && real_base != null && real_dir.has_prefix(real_base + "/")) {
-                    try {
-                        FileUtil.recursive_delete(dir);
-                        plugins.remove(id);
-                    } catch (Error e) {
-                        warning("Failed to uninstall plugin %s: %s", id, e.message);
-                    }
-                }
-            }
-        }
-
-        public string[] get_enabled_plugins() {
-            string[] result = {};
-            foreach (var plugin in plugins.get_values()) {
-                if (config.get_plugin_enabled(plugin.id)) {
-                    result += plugin.id;
-                }
-            }
-            return result;
-        }
-
-        public void set_enabled_plugins(string[] ids) {
-            // Build a set for O(1) lookup so we don't do O(n*m) iteration
-            var id_set = new HashTable<string, bool>(str_hash, str_equal);
-            foreach (var id in ids) {
-                id_set.set(id, true);
-            }
-            // Write all plugin states in one batch — avoids N separate disk writes
-            config.begin_batch();
-            foreach (var plugin in plugins.get_values()) {
-                config.set_plugin_enabled(plugin.id, id_set.contains(plugin.id));
-            }
-            config.end_batch();
         }
     }
 }

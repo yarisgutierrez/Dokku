@@ -87,23 +87,5 @@ namespace Dokku {
             warning("Theme zip had no valid theme.ini: %s", zip_path);
             return false;
         }
-
-        public void uninstall_theme(string id) {
-            var theme = themes.get(id);
-            if (theme != null && theme.path != null) {
-                var dir = Path.get_dirname(theme.path);
-                string? real_dir = Posix.realpath(dir);
-                string? real_base = Posix.realpath(user_themes_dir);
-                if (real_dir != null && real_base != null && real_dir.has_prefix(real_base + "/")) {
-                    try {
-                        FileUtil.recursive_delete(dir);
-                        themes.remove(id);
-                    } catch (Error e) {
-                        warning("Failed to uninstall theme %s: %s", id, e.message);
-                    }
-                }
-            }
-        }
-
     }
 }

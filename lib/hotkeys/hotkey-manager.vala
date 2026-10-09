@@ -133,11 +133,6 @@ namespace Dokku {
             return true;
         }
 
-        public void unregister_hotkey(string keystring) {
-            Keybinder.unbind_all(keystring);
-            registered_hotkeys.remove(keystring);
-        }
-
         public void unregister_all() {
             var keys = registered_hotkeys.get_keys();
             foreach (var keystring in keys) {
@@ -235,13 +230,8 @@ namespace Dokku {
             if (windows.length() > 0) {
                 focus_window(windows.first().data);
             } else {
-                try {
-                    usage_tracker.record_launch(app_id);
-                    app.launch();
-                } catch (Error e) {
-                    warning("Failed to launch %s: %s", app.name, e.message);
-                    hotkey_error("Failed to launch %s: %s".printf(app.name, e.message));
-                }
+                usage_tracker.record_launch(app_id);
+                app.launch();
             }
         }
 
