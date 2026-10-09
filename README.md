@@ -179,7 +179,7 @@ properties so compositor rules can target its windows:
 | `lib/plugins/` | plugin interface and built-in plugins |
 | `lib/themes/` | theme loading |
 | `lib/hotkeys/` | hotkey manager |
-| `data/` | desktop files, man page, icons, default theme |
+| `data/` | desktop files, man page, icon |
 
 ## Troubleshooting
 
