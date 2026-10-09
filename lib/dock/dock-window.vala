@@ -57,11 +57,7 @@ namespace Dokku {
         private bool drag_removing = false;
         private double drag_mouse_cross = -1;
         private const double REMOVE_THRESHOLD = 50.0;
-        private Gtk.Window? drag_float_popup = null;
-        private Gdk.Pixbuf? drag_float_icon = null;
-        private bool drag_float_poofing = false;  // true = popup is playing poof
-        private int64 poof_start_time = 0;
-        private const int POOF_DURATION_MS = 300;
+        private DragFloatPopup drag_float = new DragFloatPopup();
 
         private ProgressMonitor? progress_monitor;
         private uint progress_tick_id = 0;
@@ -84,12 +80,7 @@ namespace Dokku {
         // Separate blur-trigger window: capsule-sized, gets picom blur.
         // Keeps the main dock shape-free so magnified icons extend freely
         // above the dock background, exactly like macOS.
-        private Gtk.Window? blur_bg = null;
-
-        // Cached blur shape dimensions to avoid re-creating surface on every size_allocate
-        private int blur_shape_w = 0;
-        private int blur_shape_h = 0;
-        private double blur_shape_radius = -1;
+        private BlurBackdrop blur_backdrop;
 
         // Coalesced redraw to avoid redundant queue_draw() calls
         private bool draw_queued = false;
@@ -201,6 +192,11 @@ namespace Dokku {
 
             preview = new PreviewPopup(this, wm);
             media_popup = new MediaPopup(this);
+            blur_backdrop = new BlurBackdrop(this, () => {
+                double theme_radius = current_theme != null ? current_theme.corner_radius : 16;
+                return rounded_corners ? theme_radius : 0;
+            });
+            blur_backdrop.created.connect(apply_dock_position);
             folder_popup = new FolderPopup(this, app_manager, config, usage_tracker);
             folder_popup.launched.connect((folder_item) => trigger_bounce(folder_item.id, true));
             wm.windows_changed.connect(update_running_apps);
@@ -234,7 +230,7 @@ namespace Dokku {
                     seat.ungrab();
                     is_reordering = false;
                 }
-                destroy_drag_float_popup();
+                drag_float.destroy();
 
                 // Timeouts
                 if (dodge_check_timeout_id != 0) { Source.remove(dodge_check_timeout_id); dodge_check_timeout_id = 0; }
@@ -250,7 +246,7 @@ namespace Dokku {
                 media_popup.shutdown();
                 folder_popup.shutdown();
                 preview.shutdown();
-                if (blur_bg != null) { blur_bg.destroy(); blur_bg = null; }
+                blur_backdrop.shutdown();
             });
 
             auto_hide = config.get_auto_hide();
@@ -800,7 +796,7 @@ namespace Dokku {
             // blur area grow/shrink dynamically during magnification and
             // immediately reflect item add/remove without waiting for a
             // full reposition cycle.
-            if (blur_bg != null) {
+            if (blur_backdrop.is_active) {
                 int dx, dy;
                 get_position(out dx, out dy);
                 sync_blur_bg(dx, dy, width, height, dock_dim);
@@ -1001,35 +997,11 @@ namespace Dokku {
         private void update_compositor_hints() {
             var gdk_window = get_window();
             if (gdk_window == null) return;
-
-            var display = gdk_window.get_display();
-            if (!(display is Gdk.X11.Display)) return;
-
-            unowned X.Display xdisplay = ((Gdk.X11.Display) display).get_xdisplay();
-            X.Window xid = ((Gdk.X11.Window) gdk_window).get_xid();
-
-            // Identify this window as the Dokku dock — picom rules match on
-            // this property instead of class_g (which is unreliable for
-            // override_redirect windows)
-            X.Atom dock_atom = xdisplay.intern_atom("_DOKKU_WINDOW", false);
-            uchar[] dock_val = { 1, 0, 0, 0 };
-            xdisplay.change_property(xid, dock_atom, X.XA_CARDINAL, 32,
-                                      X.PropMode.Replace, dock_val, 1);
-
-            // Disable compositor shadow
-            X.Atom shadow_atom = xdisplay.intern_atom("_COMPTON_SHADOW", false);
-            uchar[] shadow_off = { 0, 0, 0, 0 };
-            xdisplay.change_property(xid, shadow_atom, X.XA_CARDINAL, 32,
-                                      X.PropMode.Replace, shadow_off, 1);
-
-            // Blur is handled by the separate blur_bg window (not the main dock).
-            // Always ensure _DOKKU_BLUR is removed from the main dock so picom
-            // never blurs behind it (which would cause a rectangle artifact over
-            // the full window area including the magnification zone).
-            X.Atom blur_atom = xdisplay.intern_atom("_DOKKU_BLUR", false);
-            xdisplay.delete_property(xid, blur_atom);
-
-            xdisplay.flush();
+            // Blur is handled by the separate backdrop window (not the main dock).
+            // Always remove _DOKKU_BLUR from the main dock so picom never blurs
+            // behind it (which would cause a rectangle artifact over the full
+            // window area including the magnification zone).
+            CompositorHints.apply(gdk_window, false);
         }
 
         /**
@@ -1048,38 +1020,10 @@ namespace Dokku {
             return Math.fmax(total, 200);
         }
 
-        /**
-         * Two-window blur approach:
-         *
-         * Problem: A single bounding shape cannot both (a) restrict picom blur
-         * to the dock capsule and (b) allow magnified icons to extend above it.
-         * Extending the shape for magnification causes picom to blur that area,
-         * creating a visible rectangle artifact.
-         *
-         * Solution: Use a SEPARATE transparent popup window (blur_bg) positioned
-         * behind the main dock at the capsule location. This window:
-         * - Has _DOKKU_BLUR atom → picom blurs behind it
-         * - Has a rounded-rect bounding shape matching the capsule
-         * - Is transparent → blurred desktop shows through
-         *
-         * The main dock window has NO bounding shape and NO blur atom, so:
-         * - Magnified icons extend freely (no clipping)
-         * - Picom does NOT blur behind the main dock
-         * - The semi-transparent dock background lets the blurred desktop
-         *   (from the blur_bg below) show through → frosted glass effect
-         *
-         * Compositing order: desktop → blur (capsule area) → blur_bg → main dock
-         */
+        // Frosted glass: a separate transparent window behind the capsule gets
+        // the compositor blur (see BlurBackdrop).
         private void ensure_blur_bg() {
-            if (blur_enabled && blur_bg == null && !use_layer_shell) {
-                create_blur_bg();
-            } else if ((!blur_enabled || use_layer_shell) && blur_bg != null) {
-                blur_bg.destroy();
-                blur_bg = null;
-                blur_shape_w = 0;
-                blur_shape_h = 0;
-                blur_shape_radius = -1;
-            }
+            blur_backdrop.set_enabled(blur_enabled && !use_layer_shell);
             // Clear any leftover bounding shape from the main window
             var gdk_window = get_window();
             if (gdk_window != null) {
@@ -1087,176 +1031,14 @@ namespace Dokku {
             }
         }
 
-        private void create_blur_bg() {
-            blur_bg = new Gtk.Window(Gtk.WindowType.POPUP);
-            var visual = blur_bg.get_screen().get_rgba_visual();
-            if (visual != null) blur_bg.set_visual(visual);
-            blur_bg.set_app_paintable(true);
-            blur_bg.set_decorated(false);
-            blur_bg.set_skip_taskbar_hint(true);
-            blur_bg.set_skip_pager_hint(true);
-            blur_bg.set_accept_focus(false);
-            blur_bg.set_type_hint(Gdk.WindowTypeHint.DOCK);
-
-            blur_bg.draw.connect((cr) => {
-                // Transparent — compositor blur shows through this window.
-                cr.set_operator(Cairo.Operator.SOURCE);
-                cr.set_source_rgba(0, 0, 0, 0);
-                cr.paint();
-                return true;
-            });
-
-            blur_bg.realize.connect(() => {
-                if (blur_bg == null) return;
-                var bgw = blur_bg.get_window();
-                if (bgw == null) return;
-                bgw.set_override_redirect(true);
-                set_blur_bg_hints(bgw);
-                apply_blur_bg_shape();
-            });
-
-            blur_bg.map.connect(() => {
-                if (blur_bg == null) return;
-                var bgw = blur_bg.get_window();
-                if (bgw == null) return;
-                set_blur_bg_hints(bgw);
-                apply_blur_bg_shape();
-                // Main dock must stay above the blur background
-                var main_w = get_window();
-                if (main_w != null) main_w.raise();
-            });
-
-            blur_bg.size_allocate.connect(() => {
-                apply_blur_bg_shape();
-            });
-
-            blur_bg.set_default_size(1, 1);
-            blur_bg.show_all();
-            // Trigger immediate position sync
-            apply_dock_position();
-        }
-
-        /**
-         * Set X11 atoms on the blur background window:
-         * _DOKKU_WINDOW = 1, _COMPTON_SHADOW = 0, _DOKKU_BLUR = 1
-         */
-        private void set_blur_bg_hints(Gdk.Window gdk_window) {
-            var display = gdk_window.get_display();
-            if (!(display is Gdk.X11.Display)) return;
-
-            unowned X.Display xdisplay = ((Gdk.X11.Display) display).get_xdisplay();
-            X.Window xid = ((Gdk.X11.Window) gdk_window).get_xid();
-
-            X.Atom dock_atom = xdisplay.intern_atom("_DOKKU_WINDOW", false);
-            uchar[] dock_val = { 1, 0, 0, 0 };
-            xdisplay.change_property(xid, dock_atom, X.XA_CARDINAL, 32,
-                                      X.PropMode.Replace, dock_val, 1);
-
-            X.Atom shadow_atom = xdisplay.intern_atom("_COMPTON_SHADOW", false);
-            uchar[] shadow_off = { 0, 0, 0, 0 };
-            xdisplay.change_property(xid, shadow_atom, X.XA_CARDINAL, 32,
-                                      X.PropMode.Replace, shadow_off, 1);
-
-            X.Atom blur_atom = xdisplay.intern_atom("_DOKKU_BLUR", false);
-            uchar[] blur_on = { 1, 0, 0, 0 };
-            xdisplay.change_property(xid, blur_atom, X.XA_CARDINAL, 32,
-                                      X.PropMode.Replace, blur_on, 1);
-
-            xdisplay.flush();
-        }
-
-        /**
-         * Apply a rounded-rectangle bounding shape to the blur background
-         * window so picom only blurs behind the dock capsule shape.
-         */
-        private void apply_blur_bg_shape() {
-            if (blur_bg == null) return;
-            var bgw = blur_bg.get_window();
-            if (bgw == null) return;
-
-            int w = blur_bg.get_allocated_width();
-            int h = blur_bg.get_allocated_height();
-            if (w <= 1 || h <= 1) return;
-
-            double theme_radius = current_theme != null ? current_theme.corner_radius : 16;
-            double radius = rounded_corners ? theme_radius : 0;
-
-            // Skip if dimensions and radius haven't changed
-            if (w == blur_shape_w && h == blur_shape_h && radius == blur_shape_radius) return;
-            blur_shape_w = w;
-            blur_shape_h = h;
-            blur_shape_radius = radius;
-
-            var surface = new Cairo.ImageSurface(Cairo.Format.A8, w, h);
-            var cr = new Cairo.Context(surface);
-            cr.set_operator(Cairo.Operator.SOURCE);
-            cr.set_source_rgba(0, 0, 0, 0);
-            cr.paint();
-            cr.set_source_rgba(0, 0, 0, 1);
-            draw_rounded_rect(cr, 0, 0, w, h, radius);
-            cr.fill();
-            surface.flush();
-
-            var region = Gdk.cairo_region_create_from_surface(surface);
-            bgw.shape_combine_region(region, 0, 0);
-        }
-
-        /**
-         * Position and resize the blur background window to match the dock
-         * capsule area. Accepts the actual dock_dim (which changes during
-         * magnification) so the blur area grows/shrinks with the capsule.
-         *
-         * Called from:
-         * - apply_dock_position(): uses rest dock length (for reposition/resize)
-         * - on_draw(): uses the live dock_dim from compute_layout() so the
-         *   blur follows magnification and reflects item add/remove immediately
-         */
+        // dock_dim < 0 uses the rest length (reposition/resize); on_draw passes
+        // the live value so the blur follows magnification.
         private void sync_blur_bg(int dock_x, int dock_y, int dock_w, int dock_h,
                                    double dock_dim = -1) {
-            if (blur_bg == null) return;
+            if (!blur_backdrop.is_active) return;
             if (dock_dim < 0) dock_dim = calculate_rest_dock_length();
-
-            double margin = 2;
-            int bg_x, bg_y, bg_w, bg_h;
-
-            if (dock_position == "bottom") {
-                bg_w = (int)(dock_dim - margin * 2);
-                bg_h = icon_area_height;
-                bg_x = dock_x + (dock_w - (int)dock_dim) / 2 + (int)margin;
-                bg_y = dock_y + dock_h - icon_area_height - (int)margin;
-            } else if (dock_position == "top") {
-                bg_w = (int)(dock_dim - margin * 2);
-                bg_h = icon_area_height;
-                bg_x = dock_x + (dock_w - (int)dock_dim) / 2 + (int)margin;
-                bg_y = dock_y + (int)margin;
-            } else if (dock_position == "left") {
-                bg_w = icon_area_height;
-                bg_h = (int)(dock_dim - margin * 2);
-                bg_x = dock_x + (int)margin;
-                bg_y = dock_y + (dock_h - (int)dock_dim) / 2 + (int)margin;
-            } else { // right
-                bg_w = icon_area_height;
-                bg_h = (int)(dock_dim - margin * 2);
-                bg_x = dock_x + dock_w - icon_area_height - (int)margin;
-                bg_y = dock_y + (dock_h - (int)dock_dim) / 2 + (int)margin;
-            }
-
-            bg_w = int.max(bg_w, 1);
-            bg_h = int.max(bg_h, 1);
-
-            // Only call resize/move if values actually changed — avoids
-            // recreating the X11 bounding shape 60 times/sec during hover
-            int cur_w = blur_bg.get_allocated_width();
-            int cur_h = blur_bg.get_allocated_height();
-            int cur_x, cur_y;
-            blur_bg.get_position(out cur_x, out cur_y);
-
-            if (cur_w != bg_w || cur_h != bg_h) {
-                blur_bg.resize(bg_w, bg_h);
-            }
-            if (cur_x != bg_x || cur_y != bg_y) {
-                blur_bg.move(bg_x, bg_y);
-            }
+            blur_backdrop.sync(dock_x, dock_y, dock_w, dock_h, dock_dim,
+                               dock_position, icon_area_height);
         }
 
         private void draw_items_with_layout(Cairo.Context cr, int width, int height, double[] scales, double dock_dim) {
@@ -1375,186 +1157,10 @@ namespace Dokku {
 
         }
 
-        // --- Drag-to-remove floating popup ---
-        // A small transparent overlay window that follows the cursor across the
-        // entire screen, so the icon stays visible outside the dock bounds.
-
-        private void show_drag_float_popup(DockItem item) {
-            // Cancel any running poof before starting a new drag
-            destroy_drag_float_popup();
-
-            // Cache icon pixbuf
-            string icon_name = item.icon_name;
-            if (icon_name == null || icon_name == "") icon_name = "application-x-executable";
-            try {
-                var itheme = Gtk.IconTheme.get_default();
-                drag_float_icon = itheme.load_icon(icon_name, renderer.icon_size,
-                    Gtk.IconLookupFlags.FORCE_SIZE);
-            } catch (Error e) {
-                try {
-                    var itheme = Gtk.IconTheme.get_default();
-                    drag_float_icon = itheme.load_icon("application-x-executable",
-                        renderer.icon_size, Gtk.IconLookupFlags.FORCE_SIZE);
-                } catch (Error e2) {
-                    drag_float_icon = null;
-                    drag_removing = false;
-                    return;
-                }
-            }
-
-            drag_float_poofing = false;
-
-            // Popup: large enough for the scaled icon + "Remove" label
-            int popup_size = (int)(renderer.icon_size * 1.8);
-            drag_float_popup = new Gtk.Window(Gtk.WindowType.POPUP);
-            drag_float_popup.set_type_hint(Gdk.WindowTypeHint.DND);
-            drag_float_popup.set_skip_taskbar_hint(true);
-            drag_float_popup.set_skip_pager_hint(true);
-            drag_float_popup.set_decorated(false);
-            drag_float_popup.set_resizable(false);
-            var vis = drag_float_popup.get_screen().get_rgba_visual();
-            if (vis != null) drag_float_popup.set_visual(vis);
-            drag_float_popup.set_app_paintable(true);
-            drag_float_popup.set_size_request(popup_size, popup_size);
-            drag_float_popup.resize(popup_size, popup_size);
-
-            // Cache theme state once for the draw handler
-            bool light = is_light_theme();
-
-            // Single draw handler: switches between drag and poof modes
-            drag_float_popup.draw.connect((cr) => {
-                cr.set_operator(Cairo.Operator.SOURCE);
-                cr.set_source_rgba(0, 0, 0, 0);
-                cr.paint();
-                cr.set_operator(Cairo.Operator.OVER);
-                if (drag_float_icon == null) return false;
-
-                var popup = drag_float_popup;
-                if (popup == null) return false;
-                int w = popup.get_allocated_width();
-                int h = popup.get_allocated_height();
-                double icon_w = drag_float_icon.get_width();
-                double icon_h = drag_float_icon.get_height();
-
-                if (drag_float_poofing) {
-                    // Poof mode: scale up + fade out
-                    int64 now = GLib.get_monotonic_time() / 1000;
-                    double t = ((double)(now - poof_start_time)) / POOF_DURATION_MS;
-                    if (t >= 1.0) return false;
-
-                    double ease_t = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
-                    double anim_scale = 1.0 + 0.5 * ease_t;
-                    double alpha = 1.0 - ease_t;
-
-                    cr.save();
-                    cr.translate(w / 2.0, h / 2.0);
-                    cr.scale(anim_scale, anim_scale);
-                    cr.translate(-icon_w / 2.0, -icon_h / 2.0);
-                    Gdk.cairo_set_source_pixbuf(cr, drag_float_icon, 0, 0);
-                    cr.paint_with_alpha(alpha);
-                    cr.restore();
-                } else {
-                    // Drag mode: shrink + fade + "Remove" label
-                    double away = compute_away_distance(drag_mouse_cross);
-                    double remove_t = ((away - REMOVE_THRESHOLD) / REMOVE_THRESHOLD).clamp(0, 1);
-                    double scale = 1.05 - 0.45 * remove_t;
-                    double alpha = 0.85 - 0.45 * remove_t;
-
-                    cr.save();
-                    cr.translate(w / 2.0, h / 2.0);
-                    cr.scale(scale, scale);
-                    cr.translate(-icon_w / 2.0, -icon_h / 2.0);
-                    Gdk.cairo_set_source_pixbuf(cr, drag_float_icon, 0, 0);
-                    cr.paint_with_alpha(alpha);
-                    cr.restore();
-
-                    // "Remove" label above the icon
-                    cr.select_font_face("Sans", Cairo.FontSlant.NORMAL, Cairo.FontWeight.BOLD);
-                    cr.set_font_size(11);
-                    Cairo.TextExtents te;
-                    cr.text_extents("Remove", out te);
-                    double lx = (w - te.width) / 2.0;
-                    double ly = (h / 2.0) - (icon_h * scale / 2.0) - 6;
-
-                    cr.move_to(lx + 1, ly + 1);
-                    cr.set_source_rgba(0, 0, 0, 0.6);
-                    cr.show_text("Remove");
-                    cr.move_to(lx, ly);
-                    if (light) {
-                        cr.set_source_rgba(0.15, 0.15, 0.15, 0.9);
-                    } else {
-                        cr.set_source_rgba(1, 1, 1, 0.9);
-                    }
-                    cr.show_text("Remove");
-                }
-
-                return false;
-            });
-
-            drag_float_popup.show_all();
-            // X11: override_redirect + suppress compositor shadow
-            var popup_gdk = drag_float_popup.get_window();
-            if (!use_layer_shell && popup_gdk != null) {
-                popup_gdk.set_override_redirect(true);
-                var display = popup_gdk.get_display();
-                if (display is Gdk.X11.Display) {
-                    unowned X.Display xd = ((Gdk.X11.Display) display).get_xdisplay();
-                    X.Window xid = ((Gdk.X11.Window) popup_gdk).get_xid();
-                    X.Atom dock_atom = xd.intern_atom("_DOKKU_WINDOW", false);
-                    uchar[] one = { 1, 0, 0, 0 };
-                    xd.change_property(xid, dock_atom, X.XA_CARDINAL, 32,
-                                       X.PropMode.Replace, one, 1);
-                    X.Atom shadow_atom = xd.intern_atom("_COMPTON_SHADOW", false);
-                    uchar[] zero = { 0, 0, 0, 0 };
-                    xd.change_property(xid, shadow_atom, X.XA_CARDINAL, 32,
-                                       X.PropMode.Replace, zero, 1);
-                }
-            }
-        }
-
-        private void update_drag_float_popup(double root_x, double root_y) {
-            if (drag_float_popup == null) return;
-            int popup_size = drag_float_popup.get_allocated_width();
-            int px = (int)(root_x - popup_size / 2.0);
-            int py = (int)(root_y - popup_size / 2.0);
-            drag_float_popup.move(px, py);
-            drag_float_popup.queue_draw();
-        }
-
-        private void destroy_drag_float_popup() {
-            drag_float_poofing = false;
-            if (drag_float_popup != null) {
-                drag_float_popup.destroy();
-                drag_float_popup = null;
-            }
-            drag_float_icon = null;
-        }
-
-        // Transition the floating popup into poof mode (scale-up + fade-out)
-        private void start_poof_on_popup() {
-            if (drag_float_popup == null || drag_float_icon == null) {
-                destroy_drag_float_popup();
-                return;
-            }
-            drag_float_poofing = true;
-            poof_start_time = GLib.get_monotonic_time() / 1000;
-
-            // Capture start time locally so a hypothetical second poof
-            // can't corrupt this animation's timeline
-            int64 local_start = poof_start_time;
-
-            drag_float_popup.add_tick_callback((widget, frame_clock) => {
-                int64 now = GLib.get_monotonic_time() / 1000;
-                double t = ((double)(now - local_start)) / POOF_DURATION_MS;
-                if (t >= 1.0) {
-                    destroy_drag_float_popup();
-                    return false;
-                }
-                if (drag_float_popup != null) {
-                    drag_float_popup.queue_draw();
-                }
-                return true;
-            });
+        // 0..1: how far the dragged icon is past the remove threshold
+        private double drag_remove_progress() {
+            double away = compute_away_distance(drag_mouse_cross);
+            return ((away - REMOVE_THRESHOLD) / REMOVE_THRESHOLD).clamp(0, 1);
         }
 
         private void draw_gap_indicator(Cairo.Context cr, double main_pos, double cross_center) {
@@ -1622,14 +1228,17 @@ namespace Dokku {
                     // Show/move the floating icon popup that follows the cursor
                     // across the whole screen (the dock window would clip it)
                     if (!was_removing && drag_item != null) {
-                        show_drag_float_popup(drag_item);
+                        if (!drag_float.show(drag_item, renderer.icon_size, is_light_theme(),
+                                             use_layer_shell, drag_remove_progress)) {
+                            drag_removing = false;
+                        }
                     }
-                    if (drag_float_popup != null) {
-                        update_drag_float_popup(event.x_root, event.y_root);
+                    if (drag_float.is_active) {
+                        drag_float.move_to(event.x_root, event.y_root);
                     }
                 } else {
                     // Back on dock — destroy popup and resume normal reorder
-                    destroy_drag_float_popup();
+                    drag_float.destroy();
                     reorder_insert_index = get_reorder_target_index(main_coord);
                 }
             }
@@ -1889,7 +1498,7 @@ namespace Dokku {
                         save_pinned_apps();
                         position_dock();
                         // Poof: reuse the floating popup for the dissolve animation
-                        start_poof_on_popup();
+                        drag_float.poof();
                     }
                 } else if (is_reordering && reorder_insert_index >= 0) {
                     var item = items.nth_data(drag_index);
@@ -1914,8 +1523,8 @@ namespace Dokku {
             drag_removing = false;
             drag_mouse_cross = -1;
             // Destroy float popup if poof didn't claim it (e.g. normal reorder end)
-            if (!drag_float_poofing) {
-                destroy_drag_float_popup();
+            if (!drag_float.is_poofing) {
+                drag_float.destroy();
             }
 
             // After ungrabbing, check if cursor is actually outside the dock.
@@ -2209,7 +1818,7 @@ namespace Dokku {
             update_compositor_hints();
             ensure_blur_bg();
             // Re-apply bounding shape in case rounded_corners changed
-            apply_blur_bg_shape();
+            blur_backdrop.apply_shape();
 
             update_dock_dimensions();
             load_theme();
@@ -2277,7 +1886,7 @@ namespace Dokku {
                 }
             }
 
-            // Reposition and resize dock (and blur_bg) to reflect new item count
+            // Reposition and resize dock (and the blur backdrop) to reflect new item count
             if (!use_layer_shell) {
                 position_dock();
             }
