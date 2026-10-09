@@ -476,9 +476,11 @@ namespace Dokku {
                     total += (int)(renderer.icon_size * wf * mag) + renderer.spacing;
                 }
             }
-            if (drop_insert_index >= 0) {
-                total += renderer.spacing * 2;
-            }
+            // Always reserve room for the gap that opens while dropping or
+            // reordering. Without it a dock sized exactly to its content
+            // (magnification 1.0) is clipped by the window edge, losing its
+            // rounded corners and border.
+            total += renderer.spacing * 2;
             return int.max(total, 200);
         }
 
