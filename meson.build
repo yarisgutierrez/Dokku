@@ -44,4 +44,8 @@ install_data('data/dokku-autostart.desktop',
   install_dir: join_paths(get_option('sysconfdir'), 'xdg/autostart')
 )
 
+install_data('data/icons/dokku.svg',
+  install_dir: join_paths(get_option('datadir'), 'icons/hicolor/scalable/apps')
+)
+
 install_man('data/dokku.1')

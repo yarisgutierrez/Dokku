@@ -52,6 +52,12 @@ namespace Dokku {
             base.shutdown();
         }
 
+        protected override void startup() {
+            base.startup();
+            // Falls back silently if the icon theme has no "dokku" icon (not installed)
+            Gtk.Window.set_default_icon_name("dokku");
+        }
+
         protected override void activate() {
             if (dock != null) {
                 if (show_launcher) {
