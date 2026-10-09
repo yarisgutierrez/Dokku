@@ -184,6 +184,24 @@ namespace Dokku {
         }
 
         public void launch() {
+            // Let GLib launch the entry: it honours Terminal=true, Path=, D-Bus
+            // activation and the Exec field codes, none of which a hand-built argv does,
+            // and the launch context carries focus/startup-notification (and, on
+            // Wayland, the activation token) so the new window is raised correctly.
+            if (desktop_file != null && desktop_file != "") {
+                var info = new DesktopAppInfo.from_filename(desktop_file);
+                if (info != null) {
+                    try {
+                        var display = Gdk.Display.get_default();
+                        info.launch(null, display != null ? display.get_app_launch_context() : null);
+                    } catch (Error e) {
+                        warning("Failed to launch %s: %s", name, e.message);
+                    }
+                    return;
+                }
+            }
+
+            // No usable .desktop file: run the Exec line directly
             try {
                 string[] argv;
                 Shell.parse_argv(exec, out argv);
