@@ -171,6 +171,7 @@ namespace Dokku {
             // class_g matching and our custom X11 atoms.
             // On Wayland (layer shell), this is not needed.
             realize.connect(() => {
+                input_shape_known = false;
                 if (!use_layer_shell) {
                     get_window().set_override_redirect(true);
                 }
@@ -850,12 +851,22 @@ namespace Dokku {
             return false;
         }
 
+        // What update_input_shape() last sent to the server, so identical frames
+        // (animations, media updates) don't allocate a region and make an X request.
+        private bool input_shape_known = false;
+        private bool input_shape_cleared = false;
+        private Cairo.RectangleInt input_shape_rect;
+
         private void update_input_shape(double dock_dim) {
             var window = get_window();
             if (window == null) return;
 
             if (auto_hide || dodge_hiding) {
-                window.input_shape_combine_region(null, 0, 0);
+                if (!input_shape_known || !input_shape_cleared) {
+                    window.input_shape_combine_region(null, 0, 0);
+                    input_shape_known = true;
+                    input_shape_cleared = true;
+                }
                 return;
             }
 
@@ -873,8 +884,15 @@ namespace Dokku {
                 rect = { (int)((width - dock_dim) / 2.0), height - icon_area_height - 2, (int)dock_dim, icon_area_height + 2 };
             }
 
-            var region = new Cairo.Region.rectangle(rect);
-            window.input_shape_combine_region(region, 0, 0);
+            if (input_shape_known && !input_shape_cleared
+                && rect.x == input_shape_rect.x && rect.y == input_shape_rect.y
+                && rect.width == input_shape_rect.width && rect.height == input_shape_rect.height) {
+                return;
+            }
+            input_shape_rect = rect;
+            input_shape_known = true;
+            input_shape_cleared = false;
+            window.input_shape_combine_region(new Cairo.Region.rectangle(rect), 0, 0);
         }
 
         private void compute_layout(int container_size, double[] scales, out double dock_width) {
@@ -1670,13 +1688,10 @@ namespace Dokku {
                 double pad = 6;
                 int ctrl_sz = 20;
                 double skip_x = item_start + widget_w - pad - ctrl_sz;
-                double pause_x = skip_x - 6 - ctrl_sz;
                 if (click_x >= skip_x && click_x <= skip_x + ctrl_sz) {
                     mp.next();
-                } else if (click_x >= pause_x && click_x <= pause_x + ctrl_sz) {
-                    mp.activate();
                 } else {
-                    mp.activate();
+                    mp.activate();  // play/pause button, or anywhere else on the widget
                 }
                 return;
             }
@@ -2079,7 +2094,9 @@ namespace Dokku {
 
         private void start_progress_tick() {
             if (progress_tick_id != 0) return;
-            progress_tick_id = Timeout.add(16, () => {
+            // Frame-synced like the other animations (a 16ms timer could draw twice per
+            // frame or miss one), and removed automatically if the dock is destroyed.
+            progress_tick_id = add_tick_callback((widget, frame_clock) => {
                 bool any_indeterminate = false;
                 foreach (var item in items) {
                     if (item.progress_visible && item.progress_value < 0.0) {
