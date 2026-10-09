@@ -19,8 +19,6 @@ All notable changes to Dokku are listed here. The format follows
   The desktop entries already referred to an icon that didn't exist.
 - `dokku --version` (and `-v`). The version now comes from a single place in
   `meson.build`; the Settings "About" page and the man page are generated from it.
-- **Unit tests** (`meson test`): configuration, theme and `.desktop` parsing, text
-  truncation, session capabilities, and the zip-install safety checks.
 - README with build, install, autostart, update, uninstall and troubleshooting notes,
   and a `CHANGELOG`.
 

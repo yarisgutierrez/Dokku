@@ -113,18 +113,6 @@ rm -r ~/.config/dokku ~/.local/share/dokku
 | `~/.local/share/dokku/themes/` | user-installed themes |
 | `~/.local/share/dokku/plugins/` | user script plugins |
 
-## Tests
-
-```sh
-meson test -C build --print-errorlogs
-```
-
-The unit tests cover the logic that doesn't need a display: config handling,
-theme and `.desktop` parsing, text truncation, and the zip install safety checks.
-`ConfigManager` writes to `$HOME`, so the test runner points `HOME` at a
-throwaway directory under `build/` and refuses to start otherwise. Running
-`build/tests/dokku-tests` directly is rejected for the same reason.
-
 ## X11 and Wayland
 
 Dokku detects the session when it starts; there is no setting to switch. Features
@@ -191,7 +179,6 @@ properties so compositor rules can target its windows:
 | `lib/plugins/` | plugin interface and built-in plugins |
 | `lib/themes/` | theme loading |
 | `lib/hotkeys/` | hotkey manager |
-| `tests/` | unit tests (`meson test`) |
 | `data/` | desktop files, man page, icons, default theme |
 
 ## Troubleshooting

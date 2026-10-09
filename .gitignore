@@ -14,3 +14,6 @@ builddir/
 
 # OS / tooling
 .DS_Store
+
+# Developer-only (kept locally, not shipped)
+tests/

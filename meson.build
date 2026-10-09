@@ -1,6 +1,6 @@
 project('dokku', 'vala', 'c',
   version: '0.2.0',
-  meson_version: '>= 0.50.0',
+  meson_version: '>= 0.53.0',
 )
 
 cc = meson.get_compiler('c')
@@ -35,7 +35,10 @@ add_project_arguments('--pkg', 'gdk-x11-3.0', language: 'vala')
 
 subdir('lib')
 subdir('src')
-subdir('tests')
+# Unit tests are developer-only and are not shipped in the repository
+if import('fs').exists('tests/meson.build')
+  subdir('tests')
+endif
 
 install_data('data/dokku.desktop',
   install_dir: join_paths(get_option('datadir'), 'applications')
