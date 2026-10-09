@@ -37,7 +37,7 @@ namespace Dokku {
             Keybinder.init();
 
             // Initialize Wnck.Screen for window management
-            screen = Wnck.Screen.get_default();
+            screen = (!) WindowManager.default_screen();  // global hotkeys exist only on X11
 
             // Cache Super_L/R X11 keycodes for press/release timing
             var x11_display = (Gdk.X11.Display) Gdk.Display.get_default();

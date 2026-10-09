@@ -9,11 +9,16 @@ namespace Dokku {
         public signal void attention_requested(Wnck.Window window);
         public signal void window_geometry_changed();
 
+        // The one place that asks libwnck for its screen, so the X11-only check and the
+        // deprecated call (Wnck.Handle needs libwnck 43, newer than Debian 12 and
+        // Ubuntu 22.04 ship) are not repeated. Null wherever libwnck cannot work.
+        public static unowned Wnck.Screen? default_screen() {
+            if (!Capabilities.current.supports(Feature.WINDOW_TRACKING)) return null;
+            return Wnck.Screen.get_default();
+        }
+
         public WindowManager() {
-            // libwnck only works on X11 (it warns, and returns null, elsewhere)
-            if (Capabilities.current.supports(Feature.WINDOW_TRACKING)) {
-                screen = Wnck.Screen.get_default();
-            }
+            screen = default_screen();
             state_handlers = new HashTable<unowned Wnck.Window, ulong>(direct_hash, direct_equal);
             geometry_handlers = new HashTable<unowned Wnck.Window, ulong>(direct_hash, direct_equal);
             if (screen != null) {

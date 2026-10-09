@@ -131,8 +131,7 @@ namespace Dokku {
         // --- Window-based progress detection ---
 
         private void setup_window_monitor() {
-            if (!Capabilities.current.supports(Feature.WINDOW_TRACKING)) return;
-            screen = Wnck.Screen.get_default();
+            screen = WindowManager.default_screen();
             if (screen == null) return;
             screen.window_opened.connect(on_wnck_window_opened);
             screen.window_closed.connect(on_wnck_window_closed);

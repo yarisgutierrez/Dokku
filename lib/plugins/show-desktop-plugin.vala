@@ -9,7 +9,7 @@ namespace Dokku {
         private bool showing_desktop = false;
 
         public void activate() {
-            var screen = Wnck.Screen.get_default();
+            var screen = WindowManager.default_screen();
             if (screen == null) return;  // not on X11
             showing_desktop = !showing_desktop;
             screen.toggle_showing_desktop(showing_desktop);
