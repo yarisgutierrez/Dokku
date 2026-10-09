@@ -148,7 +148,8 @@ namespace Dokku {
             var visual = get_screen().get_rgba_visual();
             if (visual != null) set_visual(visual);
 
-            add_events(Gdk.EventMask.POINTER_MOTION_MASK |
+            add_events(Gdk.EventMask.KEY_PRESS_MASK |
+                       Gdk.EventMask.POINTER_MOTION_MASK |
                        Gdk.EventMask.LEAVE_NOTIFY_MASK |
                        Gdk.EventMask.ENTER_NOTIFY_MASK |
                        Gdk.EventMask.BUTTON_PRESS_MASK |
@@ -216,6 +217,7 @@ namespace Dokku {
             leave_notify_event.connect(on_leave);
             enter_notify_event.connect(on_enter);
             button_press_event.connect(on_button_press);
+            key_press_event.connect(on_key_press);
             button_release_event.connect(on_button_release);
 
             this.destroy.connect(() => {
@@ -305,6 +307,13 @@ namespace Dokku {
             int h = is_vertical ? length : base_height;
             set_size_request(w, h);
             resize(w, h);
+        }
+
+        // A layer surface's keyboard mode only reaches the compositor on the surface's
+        // next commit, which would otherwise wait for the dock to redraw. Force one.
+        private void set_layer_shell_keyboard_mode(GtkLayerShell.KeyboardMode mode) {
+            GtkLayerShell.set_keyboard_mode(this, mode);
+            GtkLayerShell.try_force_commit(this);
         }
 
         private void apply_layer_shell_anchors() {
@@ -1478,6 +1487,16 @@ namespace Dokku {
         // same folder doesn't immediately reopen it (clicking a folder again closes it).
         private int folder_closed_by_press = -1;
 
+        // Escape closes an open folder popup. (While a popup holds keyboard focus the
+        // compositor may deliver the key to the dock rather than to the popup.)
+        private bool on_key_press(Gdk.EventKey event) {
+            if (event.keyval == Gdk.Key.Escape && folder_popup.is_open) {
+                folder_popup.dismiss();
+                return true;
+            }
+            return false;
+        }
+
         private bool on_button_press(Gdk.EventButton event) {
             if (is_reordering) return true;  // Ignore during active drag
             double main_coord = is_vertical ? event.y : event.x;
@@ -2126,6 +2145,16 @@ namespace Dokku {
                 gdk_popup.move_to_rect(rect, rect_anchor, popup_anchor,
                     Gdk.AnchorHints.FLIP | Gdk.AnchorHints.SLIDE, dx, dy);
             }
+            // The dock asks for no keyboard input, so the compositor would never send
+            // Escape to a popup of it. Take keyboard focus while a modal popup is open
+            // (like a menu does) and give it back when the popup goes away.
+            if (modal && use_layer_shell) {
+                set_layer_shell_keyboard_mode(GtkLayerShell.KeyboardMode.EXCLUSIVE);
+                popup.destroy.connect(() => {
+                    set_layer_shell_keyboard_mode(GtkLayerShell.KeyboardMode.NONE);
+                });
+            }
+
             // A Wayland popup grab has to be requested before the popup is mapped
             if (!(modal && PopupHelper.grab(popup, true))) {
                 popup.show_all();
