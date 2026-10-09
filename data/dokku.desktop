@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Dokku
+Comment=macOS-style dock and launcher for XFCE4
+Exec=dokku
+Icon=dokku
+Categories=Utility;
+Keywords=dock;launcher;taskbar;
+StartupNotify=false
+X-XFCE-Autostart=true

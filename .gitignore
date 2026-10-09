@@ -1,0 +1,16 @@
+# Build
+build/
+builddir/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Compiled
+*.o
+*.so
+*.a
+
+# OS / tooling
+.DS_Store

@@ -1,0 +1,1380 @@
+namespace Dokku {
+    public class LauncherWindow : Gtk.Window {
+        private AppManager app_manager;
+        private ConfigManager config;
+        private UsageTracker usage_tracker;
+        private Gtk.SearchEntry search_entry;
+        private Gtk.Stack page_stack;
+        private Gtk.Box page_indicator;
+        private Gtk.Box category_bar;
+        private string active_category = "All";
+        private List<weak AppInfo> filtered_apps;
+        private List<string> ordered_items;
+        private int cols = 7;
+        private int rows = 5;
+        private int current_page = 0;
+        private int total_pages = 1;
+        private Gtk.Popover? folder_popover = null;
+        private string? newly_created_folder_id = null;
+        private string? dragging_app_id = null;
+        private Gtk.Widget? folder_preview_target = null;
+        private uint folder_preview_timeout_id = 0;
+
+        private int icon_size = 64;
+        private int item_size = 100;
+        private int grid_spacing = 25;
+
+        // Smooth scroll accumulation for touchpad gestures
+        private double scroll_accumulator_x = 0.0;
+        private double scroll_accumulator_y = 0.0;
+        private const double SCROLL_THRESHOLD = 1.5;
+
+        private HashTable<string, Gdk.Pixbuf?> icon_cache;
+        private Queue<string> icon_cache_order;
+        private const int MAX_ICON_CACHE_SIZE = 512;
+        private static bool css_applied = false;
+
+        // Fade animation (frame-clock driven)
+        private uint fade_tick_id = 0;
+        private bool fading_out = false;
+        private const int FADE_DURATION_MS = 220;
+        private bool pages_dirty = true;
+        private bool has_shown_once = false;
+        private uint rebuild_idle_id = 0;
+
+        public signal void pin_to_dock_requested(string app_id, string desktop_file);
+
+        public LauncherWindow(AppManager app_manager, ConfigManager config, UsageTracker usage_tracker) {
+            Object(
+                type: Gtk.WindowType.TOPLEVEL,
+                decorated: false,
+                skip_taskbar_hint: true,
+                skip_pager_hint: true
+            );
+
+            this.app_manager = app_manager;
+            this.config = config;
+            this.usage_tracker = usage_tracker;
+            filtered_apps = new List<weak AppInfo>();
+            ordered_items = new List<string>();
+            icon_cache = new HashTable<string, Gdk.Pixbuf?>(str_hash, str_equal);
+            icon_cache_order = new Queue<string>();
+
+            set_app_paintable(true);
+            var visual = get_screen().get_rgba_visual();
+            if (visual != null) set_visual(visual);
+
+            fullscreen();
+            set_keep_above(true);
+
+            add_events(Gdk.EventMask.KEY_PRESS_MASK | Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.SCROLL_MASK);
+            key_press_event.connect(on_key_press);
+            button_press_event.connect(on_bg_click);
+            scroll_event.connect(on_scroll);
+            draw.connect(on_draw);
+
+            calculate_scale();
+            build_ui();
+
+            // Pre-build pages in idle so they're ready before the user opens
+            schedule_rebuild();
+        }
+
+        private void calculate_scale() {
+            var display = Gdk.Display.get_default();
+            var monitor = display.get_primary_monitor() ?? display.get_monitor(0);
+            var geom = monitor.get_geometry();
+            int height = geom.height;
+
+            // Scale based on vertical resolution (1080p as baseline)
+            double scale = height / 1080.0;
+            scale = double.max(1.0, scale);  // Never go below 1x
+
+            icon_size = (int)(64 * scale);
+            item_size = (int)(100 * scale);
+            grid_spacing = (int)(25 * scale);
+
+        }
+
+        private void build_ui() {
+            var main_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 15);
+            main_box.halign = Gtk.Align.FILL;
+            main_box.valign = Gtk.Align.FILL;
+            main_box.margin_top = 90;
+            main_box.margin_bottom = 80;
+            main_box.margin_start = 40;
+            main_box.margin_end = 40;
+
+            // Search bar
+            var search_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 0);
+            search_box.halign = Gtk.Align.CENTER;
+            search_entry = new Gtk.SearchEntry();
+            search_entry.placeholder_text = "Search";
+            search_entry.width_request = 220;
+            search_entry.get_style_context().add_class("launcher-search");
+            search_entry.search_changed.connect(on_search_changed);
+            search_box.pack_start(search_entry, false, false, 0);
+
+            var add_shortcut_btn = new Gtk.Button.from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON);
+            add_shortcut_btn.get_style_context().add_class("category-btn");
+            add_shortcut_btn.tooltip_text = "Create Shortcut";
+            add_shortcut_btn.clicked.connect(() => show_shortcut_dialog(null));
+            search_box.pack_start(add_shortcut_btn, false, false, 8);
+
+            main_box.pack_start(search_box, false, false, 0);
+
+            // Category filter bar
+            category_bar = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            category_bar.halign = Gtk.Align.CENTER;
+            category_bar.margin_top = 8;
+            build_category_buttons();
+            main_box.pack_start(category_bar, false, false, 0);
+
+            // Page stack (horizontal slide transitions)
+            page_stack = new Gtk.Stack();
+            page_stack.transition_type = Gtk.StackTransitionType.SLIDE_LEFT_RIGHT;
+            page_stack.transition_duration = 300;
+            page_stack.halign = Gtk.Align.CENTER;
+            page_stack.valign = Gtk.Align.CENTER;
+            page_stack.vexpand = true;
+            page_stack.hexpand = true;
+            main_box.pack_start(page_stack, true, true, 0);
+
+            // Page indicator dots
+            page_indicator = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            page_indicator.halign = Gtk.Align.CENTER;
+            page_indicator.margin_top = 20;
+            main_box.pack_start(page_indicator, false, false, 0);
+
+            add(main_box);
+
+            apply_css();
+        }
+
+        private void apply_css() {
+            if (css_applied) return;
+            css_applied = true;
+            var css = new Gtk.CssProvider();
+            try {
+                css.load_from_data("""
+                    .launcher-search {
+                        font-size: 13px;
+                        padding: 6px 14px;
+                        border-radius: 8px;
+                        background: rgba(255,255,255,0.08);
+                        border: 1px solid rgba(255,255,255,0.12);
+                        color: white;
+                        caret-color: white;
+                        -GtkWidget-cursor-color: white;
+                    }
+                    .launcher-search image {
+                        color: white;
+                        -gtk-icon-style: symbolic;
+                    }
+                    .launcher-search:focus {
+                        background: rgba(255,255,255,0.14);
+                        border: 1px solid rgba(255,255,255,0.20);
+                        color: white;
+                    }
+                    .app-item {
+                        padding: 10px;
+                        border-radius: 14px;
+                        background: transparent;
+                        outline: none;
+                        outline-width: 0;
+                        -gtk-outline-radius: 0;
+                        box-shadow: none;
+                        border: none;
+                    }
+                    .app-item:hover {
+                        background: rgba(255,255,255,0.08);
+                        outline: none;
+                        border: none;
+                    }
+                    .app-item:focus {
+                        outline: none;
+                        outline-width: 0;
+                        -gtk-outline-radius: 0;
+                        box-shadow: none;
+                        border: none;
+                        background: rgba(255,255,255,0.06);
+                    }
+                    .app-item:active {
+                        outline: none;
+                        border: none;
+                        background: rgba(255,255,255,0.12);
+                    }
+                    .app-item:checked {
+                        outline: none;
+                        border: none;
+                        background: rgba(255,255,255,0.10);
+                    }
+                    .app-item:selected {
+                        outline: none;
+                        border: none;
+                        background: rgba(255,255,255,0.2);
+                    }
+                    .app-name {
+                        color: white;
+                        font-size: 11px;
+                    }
+                    .page-dot {
+                        min-width: 8px;
+                        min-height: 8px;
+                        padding: 0;
+                        border-radius: 4px;
+                        background: rgba(255,255,255,0.3);
+                        border: none;
+                        outline: none;
+                    }
+                    .page-dot:hover {
+                        background: rgba(255,255,255,0.5);
+                    }
+                    .page-dot.active {
+                        background: rgba(255,255,255,0.8);
+                    }
+                    .folder-icon {
+                        background: rgba(160, 165, 180, 0.35);
+                        border-radius: 16px;
+                        border: none;
+                        outline: none;
+                        padding: 6px;
+                    }
+                    .folder-forming {
+                        background: rgba(170, 175, 190, 0.45);
+                        border-radius: 16px;
+                        border: none;
+                        outline: none;
+                    }
+                    .folder-title {
+                        font-size: 14px;
+                        font-weight: bold;
+                        color: white;
+                        background: transparent;
+                    }
+                    .folder-popover {
+                        background: rgba(40, 40, 40, 0.95);
+                        border: 1px solid rgba(255,255,255,0.15);
+                    }
+                    .folder-popover * {
+                        color: white;
+                    }
+                    .category-btn {
+                        font-size: 11px;
+                        padding: 3px 10px;
+                        border-radius: 12px;
+                        background: rgba(255,255,255,0.06);
+                        border: 1px solid rgba(255,255,255,0.08);
+                        color: rgba(255,255,255,0.65);
+                        min-height: 0;
+                        outline: none;
+                    }
+                    .category-btn:hover {
+                        background: rgba(255,255,255,0.12);
+                        color: white;
+                    }
+                    .category-active {
+                        background: rgba(255,255,255,0.18);
+                        border: 1px solid rgba(255,255,255,0.25);
+                        color: white;
+                    }
+                """);
+                Gtk.StyleContext.add_provider_for_screen(
+                    get_screen(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+                );
+            } catch (Error e) {}
+        }
+
+        private void build_category_buttons() {
+            category_bar.foreach((w) => category_bar.remove(w));
+
+            var all_btn = create_category_button("All");
+            category_bar.pack_start(all_btn, false, false, 0);
+
+            foreach (var cat in app_manager.get_populated_categories()) {
+                var btn = create_category_button(cat);
+                category_bar.pack_start(btn, false, false, 0);
+            }
+            category_bar.show_all();
+        }
+
+        private Gtk.Button create_category_button(string label) {
+            var btn = new Gtk.Button.with_label(label);
+            btn.get_style_context().add_class("category-btn");
+            if (label == active_category) {
+                btn.get_style_context().add_class("category-active");
+            }
+            btn.clicked.connect(() => {
+                active_category = label;
+                build_category_buttons();
+                on_search_changed();
+            });
+            return btn;
+        }
+
+        private Gdk.Pixbuf? load_cached_icon(string icon_name, int size) {
+            string key = "%s_%d".printf(icon_name, size);
+            if (icon_cache.contains(key)) {
+                return icon_cache.get(key);
+            }
+
+            // Evict oldest 25% of cache if it exceeds the limit
+            if (icon_cache.size() >= MAX_ICON_CACHE_SIZE) {
+                int to_remove = MAX_ICON_CACHE_SIZE / 4;
+                for (int i = 0; i < to_remove && !icon_cache_order.is_empty(); i++) {
+                    string old_key = icon_cache_order.pop_head();
+                    icon_cache.remove(old_key);
+                }
+            }
+
+            Gdk.Pixbuf? pixbuf = null;
+            var theme = Gtk.IconTheme.get_default();
+            try {
+                pixbuf = theme.load_icon(icon_name, size, Gtk.IconLookupFlags.FORCE_SIZE);
+            } catch (Error e) {
+                try {
+                    pixbuf = theme.load_icon("application-x-executable", size, Gtk.IconLookupFlags.FORCE_SIZE);
+                } catch (Error e2) {}
+            }
+            icon_cache.set(key, pixbuf);
+            icon_cache_order.push_tail(key);
+            return pixbuf;
+        }
+
+        private bool on_draw(Cairo.Context cr) {
+            int height = get_allocated_height();
+
+            // Vertical gradient: slightly darker at top for the search area
+            var gradient = new Cairo.Pattern.linear(0, 0, 0, height);
+            gradient.add_color_stop_rgba(0, 0.05, 0.05, 0.08, 0.92);
+            gradient.add_color_stop_rgba(1, 0.12, 0.10, 0.12, 0.88);
+            cr.set_source(gradient);
+            cr.paint();
+            return false;
+        }
+
+        private void on_search_changed() {
+            string query = search_entry.text.down();
+            filtered_apps = new List<weak AppInfo>();
+
+            foreach (var app in app_manager.get_all_apps()) {
+                if (config.is_app_hidden(app.id)) continue;
+                if (config.get_app_folder(app.id) != null) continue;
+
+                // Category filter
+                if (active_category != "All" && app.display_category != active_category) continue;
+
+                if (query == "" || app.name.down().contains(query) || app.id.down().contains(query)) {
+                    filtered_apps.append(app);
+                }
+            }
+            current_page = 0;
+            rebuild_pages();
+        }
+
+        // Full rebuild of all pages (no animation — used on search/init)
+        private void rebuild_pages() {
+            // Remove all existing pages
+            page_stack.foreach((w) => page_stack.remove(w));
+
+            // Sort by usage count (descending), then alphabetically for ties
+            var sort_arr = new GenericArray<unowned AppInfo>();
+            foreach (var app in filtered_apps) {
+                sort_arr.add(app);
+            }
+            sort_arr.sort_with_data((a, b) => {
+                int usage_a = usage_tracker.get_count(a.id);
+                int usage_b = usage_tracker.get_count(b.id);
+                if (usage_a != usage_b) return usage_b - usage_a;
+                return strcmp(a.name, b.name);
+            });
+            filtered_apps = new List<weak AppInfo>();
+            for (int si = 0; si < sort_arr.length; si++) {
+                filtered_apps.append(sort_arr[si]);
+            }
+
+            string query = search_entry.text.down();
+
+            // Collect items: folders + shortcuts + apps
+            var items = new List<string>();
+            if (search_entry.text == "") {
+                foreach (var folder_id in config.get_folder_ids()) {
+                    items.append("folder:" + folder_id);
+                }
+            }
+            // Custom shortcuts (only in "All" category)
+            if (active_category == "All") {
+                foreach (var sid in config.get_shortcut_ids()) {
+                    string sname = config.get_shortcut_name(sid);
+                    if (query == "" || sname.down().contains(query)) {
+                        items.append("shortcut:" + sid);
+                    }
+                }
+            }
+            foreach (var app in filtered_apps) {
+                items.append("app:" + app.id);
+            }
+
+            // Store ordered items for Enter-key launch
+            ordered_items = new List<string>();
+            foreach (var item in items) {
+                ordered_items.append(item);
+            }
+
+            int items_per_page = cols * rows;
+            total_pages = (int)((items.length() + items_per_page - 1) / items_per_page);
+            if (total_pages < 1) total_pages = 1;
+            if (current_page >= total_pages) current_page = total_pages - 1;
+            if (current_page < 0) current_page = 0;
+
+            // Build a Gtk.Grid for each page
+            for (int p = 0; p < total_pages; p++) {
+                var grid = new Gtk.Grid();
+                grid.row_spacing = grid_spacing;
+                grid.column_spacing = grid_spacing;
+                grid.halign = Gtk.Align.CENTER;
+                grid.valign = Gtk.Align.CENTER;
+
+                int start = p * items_per_page;
+                int idx = 0;
+
+                foreach (var item in items) {
+                    if (idx < start) { idx++; continue; }
+                    if (idx >= start + items_per_page) break;
+
+                    int pos = idx - start;
+                    int col = pos % cols;
+                    int row = pos / cols;
+
+                    Gtk.Widget widget;
+                    if (item.has_prefix("folder:")) {
+                        widget = create_folder_item(item.substring(7));
+                    } else if (item.has_prefix("shortcut:")) {
+                        widget = create_shortcut_item(item.substring(9));
+                    } else {
+                        var app = app_manager.get_app(item.substring(4));
+                        if (app != null) {
+                            widget = create_app_item(app);
+                        } else {
+                            idx++;
+                            continue;
+                        }
+                    }
+                    grid.attach(widget, col, row, 1, 1);
+                    idx++;
+                }
+
+                page_stack.add_named(grid, "page_%d".printf(p));
+            }
+
+            page_stack.show_all();
+
+            // Show current page without animation
+            page_stack.set_visible_child_full("page_%d".printf(current_page),
+                                              Gtk.StackTransitionType.NONE);
+            update_page_indicator();
+            pages_dirty = false;
+        }
+
+        // Animated page switch
+        private void go_to_page(int page) {
+            if (page < 0 || page >= total_pages || page == current_page) return;
+            current_page = page;
+            page_stack.set_visible_child_name("page_%d".printf(current_page));
+            update_page_indicator();
+        }
+
+        private void update_page_indicator() {
+            page_indicator.foreach((w) => page_indicator.remove(w));
+
+            for (int i = 0; i < total_pages; i++) {
+                var dot = new Gtk.Button();
+                dot.set_size_request(8, 8);
+                dot.get_style_context().add_class("page-dot");
+                if (i == current_page) {
+                    dot.get_style_context().add_class("active");
+                }
+                int page = i;
+                dot.clicked.connect(() => {
+                    go_to_page(page);
+                });
+                page_indicator.pack_start(dot, false, false, 0);
+            }
+            page_indicator.show_all();
+        }
+
+        private bool is_app_pinned(AppInfo app) {
+            foreach (var pinned in config.get_pinned_apps()) {
+                if (pinned == app.id || pinned == app.desktop_file) return true;
+            }
+            return false;
+        }
+
+        private Gtk.Widget create_app_item(AppInfo app) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+            btn.get_style_context().add_class("app-item");
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+            box.set_data("app-id", app.id);
+
+            var icon = new Gtk.Image();
+            var pixbuf = load_cached_icon(app.icon, icon_size);
+            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
+
+            var label = new Gtk.Label(app.name);
+            label.get_style_context().add_class("app-name");
+            label.max_width_chars = 12;
+            label.ellipsize = Pango.EllipsizeMode.END;
+
+            box.pack_start(icon, false, false, 0);
+            box.pack_start(label, false, false, 0);
+
+            btn.add(box);
+            btn.set_size_request(item_size, item_size);
+
+            // Left click - launch
+            btn.clicked.connect(() => {
+                usage_tracker.record_launch(app.id);
+                app.launch();
+                fade_hide();
+            });
+
+            // Right click - context menu
+            btn.button_press_event.connect((event) => {
+                if (event.button == 3) {
+                    show_app_menu(app, event);
+                    return true;
+                }
+                return false;
+            });
+
+            // Drag source - supports text (internal folders) + URI (dock drops)
+            Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE | Gdk.DragAction.COPY);
+            Gtk.drag_source_add_text_targets(btn);
+            if (app.desktop_file != null && app.desktop_file != "") {
+                Gtk.drag_source_add_uri_targets(btn);
+            }
+
+            // Show the app icon while dragging
+            if (pixbuf != null) {
+                Gtk.drag_source_set_icon_pixbuf(btn, pixbuf);
+            }
+
+            btn.drag_data_get.connect((ctx, data, info, time) => {
+                var target = data.get_target();
+                if (target == Gdk.Atom.intern("text/uri-list", false) && app.desktop_file != null) {
+                    data.set_uris({"file://" + app.desktop_file});
+                } else {
+                    data.set_text("app:" + app.id, -1);
+                }
+            });
+            // Track which app is being dragged (for folder preview self-detection)
+            btn.drag_begin.connect((ctx) => { dragging_app_id = app.id; });
+            btn.drag_end.connect((ctx) => {
+                dragging_app_id = null;
+                cancel_folder_preview();
+            });
+
+            // Drop target (to create folder)
+            Gtk.drag_dest_set(btn, Gtk.DestDefaults.DROP, {}, Gdk.DragAction.MOVE);
+            Gtk.drag_dest_add_text_targets(btn);
+
+            // Folder preview: show container animation after short hover
+            btn.drag_motion.connect((ctx, x, y, time) => {
+                Gdk.drag_status(ctx, Gdk.DragAction.MOVE, time);
+                // Don't preview when hovering over self
+                if (dragging_app_id != null && dragging_app_id == app.id) return true;
+                if (folder_preview_target != btn) {
+                    cancel_folder_preview();
+                    folder_preview_target = btn;
+                    folder_preview_timeout_id = Timeout.add(250, () => {
+                        folder_preview_timeout_id = 0;
+                        show_folder_preview(btn);
+                        return false;
+                    });
+                }
+                return true;
+            });
+            btn.drag_leave.connect((ctx, time) => {
+                if (folder_preview_target == btn) {
+                    cancel_folder_preview();
+                }
+            });
+
+            btn.drag_data_received.connect((ctx, x, y, data, info, time) => {
+                cancel_folder_preview();
+                string? dropped = data.get_text();
+                if (dropped != null && dropped.has_prefix("app:")) {
+                    string other_id = dropped.substring(4);
+                    if (other_id != app.id) {
+                        string folder_id = "folder_%s".printf(GLib.get_real_time().to_string());
+                        config.create_folder(folder_id, "New Folder", {other_id, app.id});
+                        newly_created_folder_id = folder_id;
+                        on_search_changed();
+                    }
+                }
+            });
+
+            return btn;
+        }
+
+        private void show_app_menu(AppInfo app, Gdk.EventButton event) {
+            var menu = new Gtk.Menu();
+
+            if (!is_app_pinned(app)) {
+                var dock_item = new Gtk.MenuItem.with_label("Add to Dock");
+                dock_item.activate.connect(() => {
+                    pin_to_dock_requested(app.id, app.desktop_file ?? "");
+                });
+                menu.append(dock_item);
+            }
+
+            var hide_item = new Gtk.MenuItem.with_label("Hide from Launcher");
+            hide_item.activate.connect(() => {
+                config.hide_app(app.id);
+                on_search_changed();
+            });
+            menu.append(hide_item);
+
+            menu.show_all();
+            menu.popup_at_pointer(event);
+        }
+
+        private Gtk.Widget create_folder_item(string folder_id) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+            btn.get_style_context().add_class("app-item");
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+
+            var icon_box = new Gtk.Grid();
+            icon_box.row_spacing = 1;
+            icon_box.column_spacing = 1;
+            icon_box.halign = Gtk.Align.CENTER;
+            icon_box.valign = Gtk.Align.CENTER;
+
+            int mini_icon = icon_size / 4;
+            var apps = config.get_folder_apps(folder_id);
+            int i = 0;
+            foreach (var app_id in apps) {
+                if (i >= 9) break;
+                var app = app_manager.get_app(app_id);
+                if (app != null) {
+                    var icon = new Gtk.Image();
+                    var pixbuf = load_cached_icon(app.icon, mini_icon);
+                    if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+                    else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.LARGE_TOOLBAR);
+                    icon_box.attach(icon, i % 3, i / 3, 1, 1);
+                    i++;
+                }
+            }
+
+            var folder_frame = new Gtk.EventBox();
+            folder_frame.get_style_context().add_class("folder-icon");
+            folder_frame.set_size_request(icon_size, icon_size);
+            folder_frame.add(icon_box);
+
+            // Pop animation for newly created folders
+            if (newly_created_folder_id == folder_id) {
+                btn.opacity = 0;
+                int64 anim_start = GLib.get_monotonic_time();
+                btn.add_tick_callback((widget, clock) => {
+                    int64 elapsed = GLib.get_monotonic_time() - anim_start;
+                    double t = double.min(1.0, elapsed / 250000.0);
+                    btn.opacity = ease_out_cubic(t);
+                    if (t >= 1.0) {
+                        newly_created_folder_id = null;
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            var label = new Gtk.Label(config.get_folder_name(folder_id));
+            label.get_style_context().add_class("app-name");
+            label.max_width_chars = 12;
+            label.ellipsize = Pango.EllipsizeMode.END;
+
+            box.pack_start(folder_frame, false, false, 0);
+            box.pack_start(label, false, false, 0);
+
+            btn.add(box);
+            btn.set_size_request(item_size, item_size);
+
+            btn.clicked.connect(() => {
+                open_folder(folder_id, btn);
+            });
+
+            btn.button_press_event.connect((event) => {
+                if (event.button == 3) {
+                    show_folder_menu(folder_id, event);
+                    return true;
+                }
+                return false;
+            });
+
+            // Drag source for reordering folders
+            Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE);
+            Gtk.drag_source_add_text_targets(btn);
+            btn.drag_data_get.connect((ctx, data, info, time) => {
+                data.set_text("folder:" + folder_id, -1);
+            });
+
+            // Drop target: accept apps (add to folder) and folders (swap positions)
+            Gtk.drag_dest_set(btn, Gtk.DestDefaults.ALL, {}, Gdk.DragAction.MOVE);
+            Gtk.drag_dest_add_text_targets(btn);
+            btn.drag_data_received.connect((ctx, x, y, data, info, time) => {
+                string? dropped = data.get_text();
+                if (dropped == null) return;
+                if (dropped.has_prefix("app:")) {
+                    config.add_app_to_folder(folder_id, dropped.substring(4));
+                    on_search_changed();
+                } else if (dropped.has_prefix("folder:")) {
+                    string other_folder_id = dropped.substring(7);
+                    if (other_folder_id != folder_id) {
+                        // Move dragged folder to this folder's position
+                        var ids = config.get_folder_ids();
+                        int target_pos = -1;
+                        for (int j = 0; j < ids.length; j++) {
+                            if (ids[j] == folder_id) { target_pos = j; break; }
+                        }
+                        if (target_pos >= 0) {
+                            config.move_folder_to_position(other_folder_id, target_pos);
+                            on_search_changed();
+                        }
+                    }
+                }
+            });
+
+            return btn;
+        }
+
+        private void show_folder_menu(string folder_id, Gdk.EventButton event) {
+            var menu = new Gtk.Menu();
+
+            var rename_item = new Gtk.MenuItem.with_label("Rename Folder");
+            rename_item.activate.connect(() => {
+                rename_folder_dialog(folder_id);
+            });
+            menu.append(rename_item);
+
+            var delete_item = new Gtk.MenuItem.with_label("Delete Folder");
+            delete_item.activate.connect(() => {
+                config.delete_folder(folder_id);
+                on_search_changed();
+            });
+            menu.append(delete_item);
+
+            menu.show_all();
+            menu.popup_at_pointer(event);
+        }
+
+        private void rename_folder_dialog(string folder_id) {
+            var dialog = new Gtk.Dialog.with_buttons("Rename Folder", this,
+                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_OK", Gtk.ResponseType.OK);
+
+            var entry = new Gtk.Entry();
+            entry.text = config.get_folder_name(folder_id);
+            entry.margin = 20;
+            entry.activates_default = true;
+            dialog.set_default_response(Gtk.ResponseType.OK);
+            dialog.get_content_area().add(entry);
+            dialog.show_all();
+
+            dialog.response.connect((response) => {
+                if (response == Gtk.ResponseType.OK) {
+                    config.rename_folder(folder_id, entry.text);
+                    on_search_changed();
+                }
+                dialog.destroy();
+            });
+        }
+
+        private void open_folder(string folder_id, Gtk.Widget anchor) {
+            if (folder_popover != null) {
+                folder_popover.popdown();
+                folder_popover = null;
+            }
+
+            folder_popover = new Gtk.Popover(anchor);
+            folder_popover.set_position(Gtk.PositionType.TOP);
+            folder_popover.get_style_context().add_class("folder-popover");
+
+            var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
+            vbox.margin = 15;
+
+            var name_label = new Gtk.Label(config.get_folder_name(folder_id));
+            name_label.halign = Gtk.Align.CENTER;
+            name_label.get_style_context().add_class("folder-title");
+            vbox.pack_start(name_label, false, false, 0);
+
+            var grid = new Gtk.Grid();
+            grid.row_spacing = 10;
+            grid.column_spacing = 10;
+            grid.halign = Gtk.Align.CENTER;
+
+            var apps = config.get_folder_apps(folder_id);
+            int i = 0;
+            foreach (var app_id in apps) {
+                var app = app_manager.get_app(app_id);
+                if (app != null) {
+                    var item = create_folder_app_item(app, folder_id);
+                    grid.attach(item, i % 4, i / 4, 1, 1);
+                    i++;
+                }
+            }
+            vbox.pack_start(grid, true, true, 0);
+
+            folder_popover.add(vbox);
+            folder_popover.show_all();
+
+            folder_popover.closed.connect(() => {
+                folder_popover = null;
+            });
+        }
+
+        private Gtk.Widget create_folder_app_item(AppInfo app, string folder_id) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
+
+            var icon = new Gtk.Image();
+            var pixbuf = load_cached_icon(app.icon, 48);
+            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
+
+            var label = new Gtk.Label(app.name);
+            label.max_width_chars = 8;
+            label.ellipsize = Pango.EllipsizeMode.END;
+            label.get_style_context().add_class("app-name");
+
+            box.pack_start(icon, false, false, 0);
+            box.pack_start(label, false, false, 0);
+            btn.add(box);
+
+            btn.clicked.connect(() => {
+                usage_tracker.record_launch(app.id);
+                app.launch();
+                if (folder_popover != null) folder_popover.popdown();
+                folder_popover = null;
+                fade_hide();
+            });
+
+            Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE);
+            Gtk.drag_source_add_text_targets(btn);
+            btn.drag_data_get.connect((ctx, data, info, time) => {
+                data.set_text("folder_app:" + folder_id + ":" + app.id, -1);
+            });
+            btn.drag_end.connect((ctx) => {
+                config.remove_app_from_folder(folder_id, app.id);
+                if (config.get_folder_apps(folder_id).length <= 1) {
+                    config.delete_folder(folder_id);
+                }
+                if (folder_popover != null) folder_popover.popdown();
+                folder_popover = null;
+                on_search_changed();
+            });
+
+            btn.button_press_event.connect((event) => {
+                if (event.button == 3) {
+                    var menu = new Gtk.Menu();
+                    var remove = new Gtk.MenuItem.with_label("Remove from Folder");
+                    remove.activate.connect(() => {
+                        config.remove_app_from_folder(folder_id, app.id);
+                        if (config.get_folder_apps(folder_id).length <= 1) {
+                            config.delete_folder(folder_id);
+                        }
+                        if (folder_popover != null) folder_popover.popdown();
+                        folder_popover = null;
+                        on_search_changed();
+                    });
+                    menu.append(remove);
+                    menu.show_all();
+                    menu.popup_at_pointer(event);
+                    return true;
+                }
+                return false;
+            });
+
+            return btn;
+        }
+
+        private Gtk.Widget create_shortcut_item(string shortcut_id) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+            btn.get_style_context().add_class("app-item");
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+
+            string icon_name = config.get_shortcut_icon(shortcut_id);
+            if (icon_name == "") icon_name = "utilities-terminal";
+
+            var icon = new Gtk.Image();
+            var pixbuf = load_cached_icon(icon_name, icon_size);
+            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+            else icon.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
+
+            var label = new Gtk.Label(config.get_shortcut_name(shortcut_id));
+            label.get_style_context().add_class("app-name");
+            label.max_width_chars = 12;
+            label.ellipsize = Pango.EllipsizeMode.END;
+
+            box.pack_start(icon, false, false, 0);
+            box.pack_start(label, false, false, 0);
+
+            btn.add(box);
+            btn.set_size_request(item_size, item_size);
+
+            btn.clicked.connect(() => {
+                string cmd = config.get_shortcut_command(shortcut_id);
+                try {
+                    string[] argv;
+                    Shell.parse_argv(cmd, out argv);
+                    Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
+                } catch (Error e) {
+                    warning("Failed to launch shortcut: %s", e.message);
+                }
+                usage_tracker.record_launch("shortcut:" + shortcut_id);
+                fade_hide();
+            });
+
+            btn.button_press_event.connect((event) => {
+                if (event.button == 3) {
+                    show_shortcut_menu(shortcut_id, event);
+                    return true;
+                }
+                return false;
+            });
+
+            return btn;
+        }
+
+        private void show_shortcut_menu(string shortcut_id, Gdk.EventButton event) {
+            var menu = new Gtk.Menu();
+
+            var edit_item = new Gtk.MenuItem.with_label("Edit Shortcut");
+            edit_item.activate.connect(() => {
+                show_shortcut_dialog(shortcut_id);
+            });
+            menu.append(edit_item);
+
+            var delete_item = new Gtk.MenuItem.with_label("Delete Shortcut");
+            delete_item.activate.connect(() => {
+                config.delete_shortcut(shortcut_id);
+                on_search_changed();
+            });
+            menu.append(delete_item);
+
+            menu.show_all();
+            menu.popup_at_pointer(event);
+        }
+
+        private void show_shortcut_dialog(string? shortcut_id) {
+            bool is_edit = shortcut_id != null;
+            string title = is_edit ? "Edit Shortcut" : "Create Shortcut";
+
+            var dialog = new Gtk.Dialog.with_buttons(title, this,
+                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_OK", Gtk.ResponseType.OK);
+            dialog.set_default_response(Gtk.ResponseType.OK);
+
+            var content = dialog.get_content_area();
+            content.spacing = 8;
+            content.margin = 16;
+
+            var name_label = new Gtk.Label("Name:");
+            name_label.halign = Gtk.Align.START;
+            content.add(name_label);
+
+            var name_entry = new Gtk.Entry();
+            name_entry.placeholder_text = "My Script";
+            if (is_edit) name_entry.text = config.get_shortcut_name(shortcut_id);
+            content.add(name_entry);
+
+            var cmd_label = new Gtk.Label("Command:");
+            cmd_label.halign = Gtk.Align.START;
+            content.add(cmd_label);
+
+            var cmd_entry = new Gtk.Entry();
+            cmd_entry.placeholder_text = "/path/to/script.sh";
+            if (is_edit) cmd_entry.text = config.get_shortcut_command(shortcut_id);
+            content.add(cmd_entry);
+
+            var icon_label = new Gtk.Label("Icon (optional):");
+            icon_label.halign = Gtk.Align.START;
+            content.add(icon_label);
+
+            var icon_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+
+            var icon_entry = new Gtk.Entry();
+            icon_entry.placeholder_text = "utilities-terminal";
+            icon_entry.hexpand = true;
+            icon_entry.activates_default = true;
+            if (is_edit) {
+                string ic = config.get_shortcut_icon(shortcut_id);
+                if (ic != "") icon_entry.text = ic;
+            }
+            icon_box.pack_start(icon_entry, true, true, 0);
+
+            var browse_btn = new Gtk.Button.from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON);
+            browse_btn.tooltip_text = "Browse for icon";
+            icon_box.pack_start(browse_btn, false, false, 0);
+
+            var icon_preview = new Gtk.Image.from_icon_name("utilities-terminal", Gtk.IconSize.LARGE_TOOLBAR);
+            icon_box.pack_start(icon_preview, false, false, 0);
+
+            // Live preview: update as user types (handles paths and theme names)
+            icon_entry.changed.connect(() => {
+                string text = icon_entry.text.strip();
+                if (text == "") {
+                    icon_preview.set_from_icon_name("utilities-terminal", Gtk.IconSize.LARGE_TOOLBAR);
+                    return;
+                }
+                if (text.has_prefix("/") && FileUtils.test(text, FileTest.EXISTS)) {
+                    try {
+                        var pixbuf = new Gdk.Pixbuf.from_file_at_size(text, 24, 24);
+                        icon_preview.set_from_pixbuf(pixbuf);
+                    } catch (Error e) {
+                        icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
+                    }
+                } else {
+                    icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
+                }
+            });
+
+            // Browse for icon file
+            browse_btn.clicked.connect(() => {
+                var chooser = new Gtk.FileChooserDialog("Choose Icon", dialog,
+                    Gtk.FileChooserAction.OPEN,
+                    "_Cancel", Gtk.ResponseType.CANCEL,
+                    "_Open", Gtk.ResponseType.ACCEPT);
+
+                var filter = new Gtk.FileFilter();
+                filter.set_filter_name("Image files");
+                filter.add_pattern("*.png");
+                filter.add_pattern("*.svg");
+                filter.add_pattern("*.xpm");
+                filter.add_pattern("*.ico");
+                chooser.add_filter(filter);
+
+                var all_filter = new Gtk.FileFilter();
+                all_filter.set_filter_name("All files");
+                all_filter.add_pattern("*");
+                chooser.add_filter(all_filter);
+
+                chooser.set_current_folder("/usr/share/icons");
+
+                var preview_img = new Gtk.Image();
+                preview_img.set_size_request(64, 64);
+                chooser.set_preview_widget(preview_img);
+                chooser.update_preview.connect(() => {
+                    string? path = chooser.get_preview_filename();
+                    if (path != null) {
+                        try {
+                            var pixbuf = new Gdk.Pixbuf.from_file_at_size(path, 64, 64);
+                            preview_img.set_from_pixbuf(pixbuf);
+                            chooser.set_preview_widget_active(true);
+                        } catch (Error e) {
+                            chooser.set_preview_widget_active(false);
+                        }
+                    }
+                });
+
+                if (chooser.run() == Gtk.ResponseType.ACCEPT) {
+                    icon_entry.text = chooser.get_filename();
+                }
+                chooser.destroy();
+            });
+
+            content.add(icon_box);
+
+            dialog.show_all();
+
+            dialog.response.connect((response) => {
+                if (response == Gtk.ResponseType.OK) {
+                    string name = name_entry.text.strip();
+                    string cmd = cmd_entry.text.strip();
+                    if (name != "" && cmd != "") {
+                        string icon_name = icon_entry.text.strip();
+                        if (icon_name == "") icon_name = "utilities-terminal";
+
+                        if (is_edit) {
+                            config.update_shortcut(shortcut_id, name, cmd, icon_name);
+                        } else {
+                            string new_id = "shortcut_%s".printf(GLib.get_real_time().to_string());
+                            config.create_shortcut(new_id, name, cmd, icon_name);
+                        }
+                        on_search_changed();
+                    }
+                }
+                dialog.destroy();
+            });
+        }
+
+        private void show_folder_preview(Gtk.Widget btn) {
+            btn.get_style_context().add_class("folder-forming");
+            // Two-phase pop animation:
+            //   Phase 1 (0–55%): smooth rise from dim to full (the "reveal")
+            //   Phase 2 (55–100%): gentle bounce dip then settle (the "pop")
+            btn.opacity = 0.3;
+            int64 start = GLib.get_monotonic_time();
+            btn.add_tick_callback((widget, clock) => {
+                int64 elapsed = GLib.get_monotonic_time() - start;
+                double t = double.min(1.0, elapsed / 380000.0);  // 380ms total
+
+                if (t < 0.55) {
+                    // Phase 1: ease-out cubic rise
+                    double p = t / 0.55;
+                    double f = 1.0 - p;
+                    double ease = 1.0 - f * f * f;
+                    widget.opacity = 0.3 + 0.7 * ease;
+                } else {
+                    // Phase 2: sine bounce — dips to ~0.92 then recovers
+                    double p = (t - 0.55) / 0.45;
+                    double bounce = Math.sin(p * Math.PI) * 0.09;
+                    widget.opacity = 1.0 - bounce;
+                }
+
+                if (t >= 1.0) {
+                    widget.opacity = 1.0;
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        private void cancel_folder_preview() {
+            if (folder_preview_timeout_id != 0) {
+                Source.remove(folder_preview_timeout_id);
+                folder_preview_timeout_id = 0;
+            }
+            if (folder_preview_target != null) {
+                folder_preview_target.get_style_context().remove_class("folder-forming");
+                folder_preview_target.opacity = 1.0;
+                folder_preview_target = null;
+            }
+        }
+
+        private bool on_key_press(Gdk.EventKey event) {
+            if (event.keyval == Gdk.Key.Escape) {
+                if (folder_popover != null) {
+                    folder_popover.popdown();
+                    folder_popover = null;
+                    return true;
+                }
+                fade_hide();
+                return true;
+            }
+            if (event.keyval == Gdk.Key.Return || event.keyval == Gdk.Key.KP_Enter) {
+                if (search_entry.text != "" && ordered_items.length() > 0) {
+                    string first = ordered_items.nth_data(0);
+                    if (first.has_prefix("app:")) {
+                        var app = app_manager.get_app(first.substring(4));
+                        if (app != null) {
+                            usage_tracker.record_launch(app.id);
+                            app.launch();
+                        }
+                    } else if (first.has_prefix("shortcut:")) {
+                        string sid = first.substring(9);
+                        string cmd = config.get_shortcut_command(sid);
+                        try {
+                            string[] argv;
+                            Shell.parse_argv(cmd, out argv);
+                            Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
+                        } catch (Error e) {}
+                        usage_tracker.record_launch("shortcut:" + sid);
+                    }
+                    fade_hide();
+                    return true;
+                }
+            }
+            if (event.keyval == Gdk.Key.Left) {
+                go_to_page(current_page - 1);
+                return true;
+            }
+            if (event.keyval == Gdk.Key.Right) {
+                go_to_page(current_page + 1);
+                return true;
+            }
+            if (!search_entry.has_focus) {
+                search_entry.grab_focus();
+            }
+            return false;
+        }
+
+        private bool on_bg_click(Gdk.EventButton event) {
+            if (folder_popover != null) {
+                folder_popover.popdown();
+                folder_popover = null;
+                return true;
+            }
+            fade_hide();
+            return true;
+        }
+
+        private bool on_scroll(Gdk.EventScroll event) {
+            if (event.direction == Gdk.ScrollDirection.LEFT || event.direction == Gdk.ScrollDirection.UP) {
+                go_to_page(current_page - 1);
+                scroll_accumulator_x = 0.0;
+                scroll_accumulator_y = 0.0;
+                return true;
+            }
+            if (event.direction == Gdk.ScrollDirection.RIGHT || event.direction == Gdk.ScrollDirection.DOWN) {
+                go_to_page(current_page + 1);
+                scroll_accumulator_x = 0.0;
+                scroll_accumulator_y = 0.0;
+                return true;
+            }
+            if (event.direction == Gdk.ScrollDirection.SMOOTH) {
+                scroll_accumulator_x += event.delta_x;
+                scroll_accumulator_y += event.delta_y;
+
+                double effective_delta = Math.fabs(scroll_accumulator_x) > Math.fabs(scroll_accumulator_y)
+                    ? scroll_accumulator_x
+                    : scroll_accumulator_y;
+
+                if (effective_delta > SCROLL_THRESHOLD) {
+                    go_to_page(current_page + 1);
+                    scroll_accumulator_x = 0.0;
+                    scroll_accumulator_y = 0.0;
+                } else if (effective_delta < -SCROLL_THRESHOLD) {
+                    go_to_page(current_page - 1);
+                    scroll_accumulator_x = 0.0;
+                    scroll_accumulator_y = 0.0;
+                }
+                return true;
+            }
+            return false;
+        }
+
+        public void toggle() {
+            if (fading_out) return;
+
+            if (visible) {
+                fade_hide();
+            } else {
+                search_entry.text = "";
+                // Pages should already be pre-built via idle; fallback sync if not
+                if (pages_dirty) {
+                    if (rebuild_idle_id != 0) {
+                        Source.remove(rebuild_idle_id);
+                        rebuild_idle_id = 0;
+                    }
+                    on_search_changed();
+                } else {
+                    current_page = 0;
+                    page_stack.set_visible_child_full("page_0",
+                        Gtk.StackTransitionType.NONE);
+                    update_page_indicator();
+                }
+                fade_show();
+            }
+        }
+
+        // Called externally when pinned apps or folders change
+        public void mark_dirty() {
+            pages_dirty = true;
+            schedule_rebuild();
+        }
+
+        // Called when app list changes (install/uninstall)
+        public void refresh_apps() {
+            build_category_buttons();
+            mark_dirty();
+        }
+
+        // Pre-build pages in an idle callback so they're ready before the user opens
+        private void schedule_rebuild() {
+            if (rebuild_idle_id != 0) return;
+            rebuild_idle_id = Idle.add(() => {
+                rebuild_idle_id = 0;
+                if (pages_dirty && !visible) {
+                    search_entry.text = "";
+                    on_search_changed();
+                }
+                return false;
+            });
+        }
+
+        // Ease-out cubic: fast start, smooth deceleration
+        private static double ease_out_cubic(double t) {
+            double f = 1.0 - t;
+            return 1.0 - f * f * f;
+        }
+
+        private void cancel_fade() {
+            if (fade_tick_id != 0) {
+                remove_tick_callback(fade_tick_id);
+                fade_tick_id = 0;
+            }
+        }
+
+        private void fade_show() {
+            cancel_fade();
+
+            // First open needs show_all() to realize all children;
+            // subsequent opens just need show() (children already realized)
+            if (!has_shown_once) {
+                show_all();
+                has_shown_once = true;
+            } else {
+                show();
+            }
+
+            bool fade_enabled = config.get_launcher_fade();
+            if (!fade_enabled) {
+                this.opacity = 1.0;
+                search_entry.grab_focus();
+                return;
+            }
+
+            this.opacity = 0.0;
+            search_entry.grab_focus();
+
+            int64 start_us = GLib.get_monotonic_time();
+            fade_tick_id = add_tick_callback((widget, clock) => {
+                int64 elapsed_us = GLib.get_monotonic_time() - start_us;
+                double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
+                this.opacity = ease_out_cubic(t);
+                if (t >= 1.0) {
+                    fade_tick_id = 0;
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        private void fade_hide() {
+            cancel_fade();
+
+            bool fade_enabled = config.get_launcher_fade();
+            if (!fade_enabled) {
+                this.opacity = 1.0;
+                hide();
+                return;
+            }
+
+            fading_out = true;
+            int64 start_us = GLib.get_monotonic_time();
+            fade_tick_id = add_tick_callback((widget, clock) => {
+                int64 elapsed_us = GLib.get_monotonic_time() - start_us;
+                double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
+                this.opacity = 1.0 - ease_out_cubic(t);
+                if (t >= 1.0) {
+                    fade_tick_id = 0;
+                    fading_out = false;
+                    this.opacity = 1.0;
+                    hide();
+                    return false;
+                }
+                return true;
+            });
+        }
+    }
+}
