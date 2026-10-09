@@ -31,7 +31,7 @@ namespace Dokku {
 
             string[] folder_apps = config.get_folder_apps(folder_item.folder_id);
 
-            popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU);
+            popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU, host.popup_parent());
 
             var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
             vbox.margin = 12;
@@ -91,13 +91,7 @@ namespace Dokku {
             });
 
             popup.add(vbox);
-            popup.show_all();
-
-            int popup_w, popup_h;
-            popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            host.popup_position(index, popup_w, popup_h, 4, out px, out py);
-            popup.move(px, py);
+            host.show_popup(popup, index, 4);
 
             popup.focus_out_event.connect(() => {
                 if (popup != null) {

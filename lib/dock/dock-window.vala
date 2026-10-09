@@ -2061,9 +2061,54 @@ namespace Dokku {
             return is_light_theme();
         }
 
-        public void popup_position(int index, int popup_w, int popup_h, int gap,
-                                   out int out_x, out int out_y) {
-            compute_popup_position(index, popup_w, popup_h, gap, out out_x, out out_y);
+        public Gtk.Window? popup_parent() {
+            return Capabilities.current.session == SessionType.WAYLAND ? this : null;
+        }
+
+        public void show_popup(Gtk.Window popup, int index, int gap) {
+            if (Capabilities.current.session != SessionType.WAYLAND) {
+                // X11: absolute screen coordinates, which need the popup's size
+                popup.show_all();
+                int popup_w, popup_h;
+                popup.get_size(out popup_w, out popup_h);
+                int px, py;
+                compute_popup_position(index, popup_w, popup_h, gap, out px, out py);
+                popup.move(px, py);
+                return;
+            }
+
+            // Wayland: ask the compositor to place the popup against an anchor
+            // rectangle on the dock itself (coordinates are relative to the dock window)
+            double item_start, item_w;
+            get_item_bounds(index, out item_start, out item_w);
+            int dw = get_allocated_width();
+            int dh = get_allocated_height();
+            int cap = icon_area_height + 2;  // the capsule's thickness
+            Gdk.Rectangle rect;
+            Gdk.Gravity rect_anchor, popup_anchor;
+            int dx = 0, dy = 0;
+            if (dock_position == "top") {
+                rect = { (int)item_start, 0, (int)item_w, cap };
+                rect_anchor = Gdk.Gravity.SOUTH; popup_anchor = Gdk.Gravity.NORTH; dy = gap;
+            } else if (dock_position == "left") {
+                rect = { 0, (int)item_start, cap, (int)item_w };
+                rect_anchor = Gdk.Gravity.EAST; popup_anchor = Gdk.Gravity.WEST; dx = gap;
+            } else if (dock_position == "right") {
+                rect = { dw - cap, (int)item_start, cap, (int)item_w };
+                rect_anchor = Gdk.Gravity.WEST; popup_anchor = Gdk.Gravity.EAST; dx = -gap;
+            } else { // bottom
+                rect = { (int)item_start, dh - cap, (int)item_w, cap };
+                rect_anchor = Gdk.Gravity.NORTH; popup_anchor = Gdk.Gravity.SOUTH; dy = -gap;
+            }
+
+            // The window must exist before it can be positioned, and be placed before it is shown
+            popup.realize();
+            var gdk_popup = popup.get_window();
+            if (gdk_popup != null) {
+                gdk_popup.move_to_rect(rect, rect_anchor, popup_anchor,
+                    Gdk.AnchorHints.FLIP | Gdk.AnchorHints.SLIDE, dx, dy);
+            }
+            popup.show_all();
         }
 
         private void compute_popup_position(int index, int popup_w, int popup_h, int gap,

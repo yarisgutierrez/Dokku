@@ -75,7 +75,7 @@ namespace Dokku {
 
             pointer_inside = false;
 
-            popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU);
+            popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU, host.popup_parent());
 
             bool popup_light = host.popup_is_light();
 
@@ -187,13 +187,7 @@ namespace Dokku {
 
             // Start fully transparent for fade-in
             ((Gtk.Widget)popup).opacity = 0.0;
-            popup.show_all();
-
-            int popup_w, popup_h;
-            popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            host.popup_position(index, popup_w, popup_h, 8, out px, out py);
-            popup.move(px, py);
+            host.show_popup(popup, index, 8);
 
             // Fade in
             fading_out = false;

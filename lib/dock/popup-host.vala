@@ -4,8 +4,11 @@ namespace Dokku {
         public abstract DockItem? popup_item(int index);
         public abstract Theme? popup_theme();
         public abstract bool popup_is_light();
-        // Top-left screen position for a popup of the given size anchored to item `index`.
-        public abstract void popup_position(int index, int popup_w, int popup_h, int gap,
-                                            out int out_x, out int out_y);
+        // Window popups must be transient for, or null when absolute positioning works
+        // (X11). Wayland can only place a popup relative to a parent surface.
+        public abstract Gtk.Window? popup_parent();
+        // Show `popup` next to dock item `index`, `gap` pixels away, on the side of the
+        // dock that faces the screen. Call after the popup's content is built.
+        public abstract void show_popup(Gtk.Window popup, int index, int gap);
     }
 }

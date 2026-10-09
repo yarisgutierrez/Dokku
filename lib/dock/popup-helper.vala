@@ -1,12 +1,15 @@
 namespace Dokku {
     // Shared construction/painting for the dock's themed popup windows.
     public class PopupHelper : GLib.Object {
-        public static Gtk.Window create_window(Gdk.WindowTypeHint hint = Gdk.WindowTypeHint.POPUP_MENU) {
+        public static Gtk.Window create_window(Gdk.WindowTypeHint hint = Gdk.WindowTypeHint.POPUP_MENU,
+                                               Gtk.Window? parent = null) {
             var popup = new Gtk.Window(Gtk.WindowType.POPUP);
             popup.set_type_hint(hint);
             popup.set_skip_taskbar_hint(true);
             popup.set_skip_pager_hint(true);
             popup.set_decorated(false);
+            // Wayland positions a popup relative to its parent; without one it can't
+            if (parent != null) popup.set_transient_for(parent);
             popup.set_resizable(false);
             var vis = popup.get_screen().get_rgba_visual();
             if (vis != null) popup.set_visual(vis);

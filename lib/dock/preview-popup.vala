@@ -73,7 +73,7 @@ namespace Dokku {
 
             dismiss();
 
-            popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP);
+            popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 
             var label = new Gtk.Label(item.name);
             label.margin = 6;
@@ -91,13 +91,7 @@ namespace Dokku {
                 return false;
             });
 
-            popup.show_all();
-
-            int popup_w, popup_h;
-            popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            host.popup_position(index, popup_w, popup_h, 8, out px, out py);
-            popup.move(px, py);
+            host.show_popup(popup, index, 8);
 
             popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
                                      Gdk.EventMask.LEAVE_NOTIFY_MASK);
@@ -118,7 +112,7 @@ namespace Dokku {
 
             dismiss();
 
-            popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP);
+            popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 
             bool popup_light = host.popup_is_light();
             var label_css = new Gtk.CssProvider();
@@ -175,13 +169,7 @@ namespace Dokku {
                                      Gdk.EventMask.LEAVE_NOTIFY_MASK);
 
             popup.add(box);
-            popup.show_all();
-
-            int popup_w, popup_h;
-            popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            host.popup_position(index, popup_w, popup_h, 8, out px, out py);
-            popup.move(px, py);
+            host.show_popup(popup, index, 8);
 
             // Mouse entering popup cancels any pending dismiss
             popup.enter_notify_event.connect((ev) => {
