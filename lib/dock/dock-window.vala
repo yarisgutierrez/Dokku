@@ -123,7 +123,7 @@ namespace Dokku {
             bounce_cooldowns = new HashTable<string, int64?>(str_hash, str_equal);
 
             // Compositor blur hint
-            blur_enabled = config.get_blur_enabled();
+            blur_enabled = config.get_blur_enabled() && Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
 
             load_theme();
             
@@ -245,7 +245,7 @@ namespace Dokku {
             });
 
             auto_hide = config.get_auto_hide();
-            dodge_windows = config.get_dodge_windows();
+            dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
             dock_position = config.get_position();
             is_vertical = (dock_position == "left" || dock_position == "right");
             renderer.icon_size = config.get_icon_size();
@@ -341,7 +341,8 @@ namespace Dokku {
                 }
             }
 
-            if (config.get_plugin_enabled("show-desktop")) {
+            if (config.get_plugin_enabled("show-desktop")
+                && Capabilities.current.supports(Feature.WINDOW_TRACKING)) {
                 var p = plugin_manager.get_plugin("show-desktop");
                 if (p != null) items.append(new DockItem.from_plugin(p));
             }
@@ -1814,12 +1815,12 @@ namespace Dokku {
             renderer.icon_size = config.get_icon_size();
             renderer.magnification = config.get_magnification();
             auto_hide = config.get_auto_hide();
-            dodge_windows = config.get_dodge_windows();
+            dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();
 
             // Compositor blur hint
-            blur_enabled = config.get_blur_enabled();
+            blur_enabled = config.get_blur_enabled() && Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
             update_compositor_hints();
             ensure_blur_bg();
             // Re-apply bounding shape in case rounded_corners changed

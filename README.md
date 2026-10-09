@@ -124,6 +124,32 @@ theme and `.desktop` parsing, text truncation, and the zip install safety checks
 throwaway directory under `build/` and refuses to start otherwise. Running
 `build/tests/dokku-tests` directly is rejected for the same reason.
 
+## X11 and Wayland
+
+Dokku detects the session when it starts; there is no setting to switch. Features
+that depend on X11-only libraries are turned off on Wayland, and the Settings
+window shows why next to each one.
+
+| Feature | X11 | Wayland |
+|---------|-----|---------|
+| Dock, magnification, folders, drag and drop, themes | yes | yes (layer-shell) |
+| Launcher, Settings, media widget, notification badges | yes | yes |
+| Running-app indicators, window previews, attention bounce | yes | not yet |
+| Dodge windows, Show Desktop button | yes | not yet |
+| Global hotkeys | yes | no: bind a key in your compositor to `dokku --launcher` |
+| Frosted glass | yes (picom) | not yet |
+
+Window tracking on Wayland would need the `zwlr_foreign_toplevel_manager_v1`
+protocol, which labwc and sway provide. It isn't implemented yet.
+
+**Wayland status: experimental.** On the stack I tested (GTK 3.24.52,
+gtk-layer-shell 0.10.1, libwayland 1.26, with labwc 0.20.2 and sway 1.12), GTK3
+layer-shell windows are created and configured but never drawn, so the dock does
+not appear. A short standalone program with no Dokku code shows the same thing
+([docs/wayland-layer-shell-repro.py](docs/wayland-layer-shell-repro.py)). The
+Settings and launcher windows are ordinary windows and work normally. Reports
+and results from other compositor or library versions are welcome.
+
 ## Usage
 
 ```
@@ -162,6 +188,7 @@ properties so compositor rules can target its windows:
 | `lib/themes/` | theme loading |
 | `lib/hotkeys/` | hotkey manager |
 | `tests/` | unit tests (`meson test`) |
+| `docs/` | notes and reproductions |
 | `data/` | desktop files, man page, icons, default theme |
 
 ## Troubleshooting

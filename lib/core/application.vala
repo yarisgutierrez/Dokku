@@ -120,15 +120,22 @@ namespace Dokku {
                 dock.reload_settings();
             });
 
-            hotkey_manager = new HotkeyManager(config, launcher, app_manager, usage_tracker);
-            hotkey_manager.hotkey_error.connect((message) => {
-                warning("Hotkey error: %s", message);
-                var notification = new Notification("Dokku Hotkey Error");
-                notification.set_body(message);
-                send_notification(null, notification);
-            });
-            if (hotkey_manager.initialize()) {
-                hotkey_manager.reload_hotkeys();
+            var caps = Capabilities.current;
+            message("Session: %s", caps.describe());
+            if (caps.supports(Feature.GLOBAL_HOTKEYS)) {
+                hotkey_manager = new HotkeyManager(config, launcher, app_manager, usage_tracker);
+                hotkey_manager.hotkey_error.connect((message) => {
+                    warning("Hotkey error: %s", message);
+                    var notification = new Notification("Dokku Hotkey Error");
+                    notification.set_body(message);
+                    send_notification(null, notification);
+                });
+                if (hotkey_manager.initialize()) {
+                    hotkey_manager.reload_hotkeys();
+                }
+            } else {
+                // Not an error: this session has no global-hotkey mechanism we can use
+                message("Global hotkeys: %s", caps.why_not(Feature.GLOBAL_HOTKEYS));
             }
 
             // Register D-Bus service for external control

@@ -10,7 +10,10 @@ namespace Dokku {
         public signal void window_geometry_changed();
 
         public WindowManager() {
-            screen = Wnck.Screen.get_default();
+            // libwnck only works on X11 (it warns, and returns null, elsewhere)
+            if (Capabilities.current.supports(Feature.WINDOW_TRACKING)) {
+                screen = Wnck.Screen.get_default();
+            }
             state_handlers = new HashTable<unowned Wnck.Window, ulong>(direct_hash, direct_equal);
             geometry_handlers = new HashTable<unowned Wnck.Window, ulong>(direct_hash, direct_equal);
             if (screen != null) {

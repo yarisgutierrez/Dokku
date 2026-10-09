@@ -114,6 +114,11 @@ namespace Dokku {
             return box;
         }
 
+        // Subtitle for a setting: the reason it is unavailable in this session, or `normal`.
+        private string subtitle_for(Feature feature, string normal) {
+            return Capabilities.current.why_not(feature) ?? normal;
+        }
+
         private Gtk.Label make_section_header(string title, bool first = false) {
             var label = new Gtk.Label("<b>%s</b>".printf(title));
             label.use_markup = true;
@@ -277,9 +282,12 @@ namespace Dokku {
             style_grid.attach(opacity_scale, 1, row++, 1, 1);
 
             // Frosted glass (compositor blur)
-            style_grid.attach(make_setting_label("Frosted glass", "Requires a compositor with blur support (e.g. Picom)"), 0, row, 1, 1);
+            style_grid.attach(make_setting_label("Frosted glass", subtitle_for(Feature.COMPOSITOR_BLUR,
+                "Requires a compositor with blur support (e.g. Picom)")), 0, row, 1, 1);
             var blur_switch = new Gtk.Switch();
-            blur_switch.active = config.get_blur_enabled();
+            bool blur_ok = Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
+            blur_switch.active = blur_ok && config.get_blur_enabled();
+            blur_switch.sensitive = blur_ok;
             blur_switch.halign = Gtk.Align.START;
             blur_switch.valign = Gtk.Align.CENTER;
             blur_switch.notify["active"].connect(() => {
@@ -364,9 +372,12 @@ namespace Dokku {
             vis_grid.attach(hide_switch, 1, row++, 1, 1);
 
             // Dodge windows
-            vis_grid.attach(make_setting_label("Dodge windows", "Hide when a window overlaps the dock"), 0, row, 1, 1);
+            vis_grid.attach(make_setting_label("Dodge windows", subtitle_for(Feature.DODGE_WINDOWS,
+                "Hide when a window overlaps the dock")), 0, row, 1, 1);
             var dodge_switch = new Gtk.Switch();
-            dodge_switch.active = config.get_dodge_windows();
+            bool dodge_ok = Capabilities.current.supports(Feature.DODGE_WINDOWS);
+            dodge_switch.active = dodge_ok && config.get_dodge_windows();
+            dodge_switch.sensitive = dodge_ok;
             dodge_switch.halign = Gtk.Align.START;
             dodge_switch.valign = Gtk.Align.CENTER;
             dodge_switch.notify["active"].connect(() => {
@@ -478,9 +489,12 @@ namespace Dokku {
             items_grid.attach(sep_switch, 1, row++, 1, 1);
 
             // Show Desktop
-            items_grid.attach(make_setting_label("Show Desktop", "Button to minimize all windows"), 0, row, 1, 1);
+            items_grid.attach(make_setting_label("Show Desktop", subtitle_for(Feature.WINDOW_TRACKING,
+                "Button to minimize all windows")), 0, row, 1, 1);
             var desktop_switch = new Gtk.Switch();
-            desktop_switch.active = config.get_plugin_enabled("show-desktop");
+            bool desktop_ok = Capabilities.current.supports(Feature.WINDOW_TRACKING);
+            desktop_switch.active = desktop_ok && config.get_plugin_enabled("show-desktop");
+            desktop_switch.sensitive = desktop_ok;
             desktop_switch.halign = Gtk.Align.START;
             desktop_switch.valign = Gtk.Align.CENTER;
             desktop_switch.notify["active"].connect(() => {
@@ -654,8 +668,19 @@ namespace Dokku {
             app_entries = new Gtk.Entry[4];
             app_hotkey_buttons = new HotkeyCaptureButton[4];
 
+            // Without global-hotkey support (Wayland), explain and offer the alternative
+            string? hotkeys_unavailable = Capabilities.current.why_not(Feature.GLOBAL_HOTKEYS);
+            if (hotkeys_unavailable != null) {
+                var banner = new Gtk.Label(hotkeys_unavailable + ".");
+                banner.wrap = true;
+                banner.xalign = 0;
+                banner.margin_bottom = 12;
+                banner.get_style_context().add_class("dim-label");
+                outer.pack_start(banner, false, false, 0);
+            }
+
             // --- Launcher Hotkey section ---
-            outer.pack_start(make_section_header("Launcher Hotkey", true), false, false, 0);
+            outer.pack_start(make_section_header("Launcher Hotkey", hotkeys_unavailable == null), false, false, 0);
 
             var launcher_card = make_card();
             var launcher_grid = make_card_grid();
@@ -763,6 +788,11 @@ namespace Dokku {
             app_card.pack_start(app_grid, true, true, 0);
             outer.pack_start(app_card, false, false, 0);
 
+            if (hotkeys_unavailable != null) {
+                launcher_card.sensitive = false;
+                app_card.sensitive = false;
+            }
+
             return outer;
         }
 
@@ -789,6 +819,10 @@ namespace Dokku {
             var version = new Gtk.Label("Version " + VERSION);
             version.get_style_context().add_class("dim-label");
             box.pack_start(version, false, false, 0);
+
+            var session_label = new Gtk.Label("Session: " + Capabilities.current.describe());
+            session_label.get_style_context().add_class("dim-label");
+            box.pack_start(session_label, false, false, 0);
 
             var desc = new Gtk.Label("A lightweight and configurable dock for XFCE4");
             desc.wrap = true;

@@ -12,6 +12,7 @@ int main(string[] args) {
     }
 
     Dokku.Tests.TextUtilTests.register();
+    Dokku.Tests.CapabilitiesTests.register();
     Dokku.Tests.ThemeTests.register();
     Dokku.Tests.AppInfoTests.register();
     Dokku.Tests.FileUtilTests.register();
