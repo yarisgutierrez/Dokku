@@ -32,19 +32,21 @@ namespace Dokku {
                 return 0;
             }
 
-            // Check for our custom options
+            // --launcher and --settings are handled in command_line(): this method only
+            // runs in the process the user typed the command in, which is not the
+            // running dock when one already exists.
+            return -1;
+        }
+
+        protected override int command_line(ApplicationCommandLine command_line) {
+            // Runs in the primary instance, with the options forwarded from the caller
+            var options = command_line.get_options_dict();
             if (options.contains("launcher")) {
                 show_launcher = true;
             }
             if (options.contains("settings")) {
                 show_settings = true;
             }
-            
-            // Continue to command_line
-            return -1;
-        }
-        
-        protected override int command_line(ApplicationCommandLine command_line) {
             activate();
             return 0;
         }
