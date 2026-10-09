@@ -160,11 +160,6 @@ namespace Dokku {
             drag_motion.connect(on_drag_motion);
             drag_leave.connect(on_drag_leave);
 
-            if (is_vertical)
-                set_default_size(base_height, calculate_dock_length());
-            else
-                set_default_size(calculate_dock_length(), base_height);
-
             if (!use_layer_shell) {
                 realize.connect(position_dock);
             }
@@ -258,6 +253,14 @@ namespace Dokku {
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();
             update_dock_dimensions();
+
+            // Size the window only now that base_height is known. Layer-shell takes
+            // the surface size from this; with base_height still 0 the compositor was
+            // given a 1px-tall dock. (X11 corrects it on realize via position_dock.)
+            if (is_vertical)
+                set_default_size(base_height, calculate_dock_length());
+            else
+                set_default_size(calculate_dock_length(), base_height);
 
             if (use_layer_shell) {
                 apply_layer_shell_anchors();
@@ -1888,10 +1891,9 @@ namespace Dokku {
                 }
             }
 
-            // Reposition and resize dock (and the blur backdrop) to reflect new item count
-            if (!use_layer_shell) {
-                position_dock();
-            }
+            // Reposition and resize dock (and the blur backdrop) to reflect new item count.
+            // On layer-shell this resizes the surface; the compositor does the positioning.
+            position_dock();
         }
 
         // --- Bounce animation ---
