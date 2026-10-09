@@ -6,11 +6,35 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-09
+
 ### Fixed
 - `dokku --launcher` and `dokku --settings` did nothing when a dock was already running,
   which is the normal case. The options were read in the process you typed the command
   in, not in the running dock. This also affects binding a compositor key to
   `dokku --launcher`, which is how to open the launcher on Wayland.
+- Every settings change, pin, D-Bus property write or change to the installed apps added
+  another handler to the media, trash and script plugins and never removed it, so after
+  N reloads a single track change ran N+1 handlers.
+- Apps whose `.desktop` file gives an absolute icon path (a tarball Firefox, vendor tools)
+  showed a fallback or broken icon in the launcher, the folder popup, the window list and
+  the drag-to-remove icon. Icons now load through one shared loader.
+- Apps now launch through GLib, so `Terminal=true` apps open in a terminal, `Path=` is
+  honoured, D-Bus activation works, `Exec` field codes follow the specification, and the new
+  window is focused correctly on Wayland. Before, a terminal app ran with no terminal.
+- Apps whose `.desktop` file has no `Icon=` (or no `Name=`) silently disappeared from the
+  launcher and could not be launched. They now appear with a generic icon (or their file
+  name).
+- A monitor plugged in while Dokku is running now gets a dock, and one that is unplugged
+  loses it. Docks were only synchronised at startup and when a setting changed.
+
+### Changed
+- Less repeated work per frame: the dock skips re-sending an unchanged input shape, and the
+  indeterminate-progress animation is frame-synced like the others.
+- libwnck's screen is requested in one place, and about 115 lines of unused code and two
+  unused data files were removed.
+- `gio-unix-2.0` is now listed as a dependency. It ships in `libgio-2.0-dev` with `gio-2.0`,
+  so nothing new is needed to build.
 
 ## [0.2.0] - 2026-10-09
 
@@ -66,5 +90,6 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
-[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yarisgutierrez/Dokku/releases/tag/v0.2.0
