@@ -30,6 +30,9 @@ sudo apt install valac meson ninja-build libgtk-3-dev libwnck-3-dev \
 # optional: libatspi2.0-dev
 ```
 
+**Runtime:** `gvfs-backends` is needed for album art in the media widget. Players such as
+Spotify publish `https://` art URLs, and GIO fetches them through the GVfs HTTP daemon.
+
 ```sh
 meson setup build
 ninja -C build

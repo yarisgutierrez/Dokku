@@ -312,6 +312,7 @@ namespace Dokku {
                 _art_cached_size = 0;
                 changed();
             } catch (Error e) {
+                warning("Could not load album art from %s: %s", url, e.message);
                 _art_pixbuf = null;
                 _art_scaled = null;
                 _art_cached_size = 0;
