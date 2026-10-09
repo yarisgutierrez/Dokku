@@ -79,6 +79,11 @@ properties so compositor rules can target its windows:
 | `lib/hotkeys/` | hotkey manager |
 | `data/` | desktop files, man page, icons, default theme |
 
+## Contributing
+
+Issues and pull requests are welcome at
+<https://github.com/yarisgutierrez/Dokku>.
+
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE).
