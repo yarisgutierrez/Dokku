@@ -1260,7 +1260,7 @@ namespace Dokku {
             }
 
             // Hover popup: multi-window apps get preview, others get name tooltip
-            if (hovered_index >= 0 && !is_reordering) {
+            if (hovered_index >= 0 && !is_reordering && !folder_popup.is_open) {
                 var hovered_item = items.nth_data(hovered_index);
                 if (hovered_item != null && hovered_item.running && hovered_item.windows.length() > 1) {
                     // Multi-window: window preview popup after 400ms
@@ -1474,9 +1474,19 @@ namespace Dokku {
             }
         }
 
+        // Index of the folder whose popup this click just closed, so releasing on the
+        // same folder doesn't immediately reopen it (clicking a folder again closes it).
+        private int folder_closed_by_press = -1;
+
         private bool on_button_press(Gdk.EventButton event) {
             if (is_reordering) return true;  // Ignore during active drag
             double main_coord = is_vertical ? event.y : event.x;
+
+            // A click on the dock closes an open folder popup, and hides any tooltip
+            folder_closed_by_press = folder_popup.open_index;
+            folder_popup.dismiss();
+            preview.cancel_timer();
+            preview.dismiss();
             if (event.button == 1) {
                 drag_start_x = main_coord;
                 drag_index = get_item_at(main_coord);
@@ -1605,7 +1615,14 @@ namespace Dokku {
             if (item == null) return;
 
             if (item.is_launcher) { launcher_requested(); return; }
-            if (item.is_folder) { folder_popup.show(item, index); return; }
+            if (item.is_folder) {
+                if (folder_closed_by_press == index) {
+                    folder_closed_by_press = -1;  // this click closed it; don't reopen
+                } else {
+                    folder_popup.show(item, index);
+                }
+                return;
+            }
             if (item.is_media_widget && item.plugin is MediaPlugin) {
                 var mp = item.plugin as MediaPlugin;
                 if (is_vertical) {
@@ -2065,7 +2082,7 @@ namespace Dokku {
             return Capabilities.current.session == SessionType.WAYLAND ? this : null;
         }
 
-        public void show_popup(Gtk.Window popup, int index, int gap) {
+        public void show_popup(Gtk.Window popup, int index, int gap, bool modal = false) {
             if (Capabilities.current.session != SessionType.WAYLAND) {
                 // X11: absolute screen coordinates, which need the popup's size
                 popup.show_all();
@@ -2074,6 +2091,7 @@ namespace Dokku {
                 int px, py;
                 compute_popup_position(index, popup_w, popup_h, gap, out px, out py);
                 popup.move(px, py);
+                if (modal) PopupHelper.grab(popup, false);
                 return;
             }
 
@@ -2108,7 +2126,10 @@ namespace Dokku {
                 gdk_popup.move_to_rect(rect, rect_anchor, popup_anchor,
                     Gdk.AnchorHints.FLIP | Gdk.AnchorHints.SLIDE, dx, dy);
             }
-            popup.show_all();
+            // A Wayland popup grab has to be requested before the popup is mapped
+            if (!(modal && PopupHelper.grab(popup, true))) {
+                popup.show_all();
+            }
         }
 
         private void compute_popup_position(int index, int popup_w, int popup_h, int gap,

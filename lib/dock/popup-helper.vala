@@ -1,4 +1,6 @@
 namespace Dokku {
+    public delegate void DismissFunc();
+
     // Shared construction/painting for the dock's themed popup windows.
     public class PopupHelper : GLib.Object {
         public static Gtk.Window create_window(Gdk.WindowTypeHint hint = Gdk.WindowTypeHint.POPUP_MENU,
@@ -42,6 +44,79 @@ namespace Dokku {
             }
             cr.set_line_width(1);
             cr.stroke();
+        }
+
+        // Grab the pointer and keyboard for `popup` so clicks elsewhere can close it.
+        // With `show_in_grab` the popup is shown from inside the grab, which Wayland
+        // needs (the grab must exist before the popup is mapped). Returns true if the
+        // popup was shown that way.
+        public static bool grab(Gtk.Window popup, bool show_in_grab) {
+            var gdk_window = popup.get_window();
+            if (gdk_window == null) return false;
+            var seat = popup.get_display().get_default_seat();
+            const Gdk.SeatCapabilities caps =
+                Gdk.SeatCapabilities.POINTER | Gdk.SeatCapabilities.KEYBOARD;
+            bool shown = false;
+            Gdk.GrabStatus status;
+            if (show_in_grab) {
+                status = seat.grab(gdk_window, caps, true, null, null, (s, w) => {
+                    popup.show_all();
+                    shown = true;
+                });
+            } else {
+                status = seat.grab(gdk_window, caps, true, null, null, null);
+            }
+            if (status != Gdk.GrabStatus.SUCCESS) {
+                warning("Popup grab failed (%d); it will not close on outside clicks", (int) status);
+            }
+            return shown;
+        }
+
+        public static void ungrab(Gtk.Window popup) {
+            popup.get_display().get_default_seat().ungrab();
+        }
+
+        // Call `on_dismiss` when the user clicks outside `popup` (X11), the compositor
+        // dismisses it (Wayland), or Escape is pressed. Use together with a modal
+        // show_popup().
+        public static void connect_dismissal(Gtk.Window popup, owned DismissFunc on_dismiss) {
+            popup.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.KEY_PRESS_MASK);
+            popup.button_press_event.connect((ev) => {
+                // Events redirected to the popup by the grab keep the *originating*
+                // window's coordinates, and Wayland has no screen coordinates at all, so
+                // ask GDK which of our windows the pointer is over instead. A click is
+                // inside only if that window belongs to the popup; over the dock, or
+                // over no window of ours, it is outside.
+                var popup_window = popup.get_window();
+                if (popup_window == null) return false;
+                int wx, wy;
+                var pointer = popup.get_display().get_default_seat().get_pointer();
+                var under = pointer.get_window_at_position(out wx, out wy);
+                bool inside = under != null && under.get_toplevel() == popup_window;
+                if (!inside) {
+                    on_dismiss();
+                    return true;
+                }
+                return false;
+            });
+            popup.grab_broken_event.connect((ev) => {
+                on_dismiss();
+                return false;
+            });
+            // Wayland dismisses a grabbed popup by unmapping it (xdg_popup.popup_done)
+            // without any other event, so the owner must hear about that too.
+            popup.unmap_event.connect((ev) => {
+                on_dismiss();
+                return false;
+            });
+            popup.hide.connect(() => on_dismiss());
+            popup.key_press_event.connect((ev) => {
+                if (ev.keyval == Gdk.Key.Escape) {
+                    on_dismiss();
+                    return true;
+                }
+                return false;
+            });
         }
     }
 }

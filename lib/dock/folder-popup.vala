@@ -17,21 +17,40 @@ namespace Dokku {
             this.usage_tracker = usage_tracker;
         }
 
-        public void shutdown() {
-            if (popup != null) { popup.destroy(); popup = null; }
-        }
-
         private Gtk.Window? popup = null;
 
+        public bool is_open { get { return popup != null; } }
+
+        // Dock index of the folder this popup is open for, or -1.
+        public int open_index { get; private set; default = -1; }
+
+        public void shutdown() {
+            dismiss();
+        }
+
+        // Close the popup (and release its grab) if it is open.
+        public void dismiss() {
+            if (popup == null) return;
+            var closing = popup;
+            popup = null;
+            open_index = -1;
+            PopupHelper.ungrab(closing);
+            closing.destroy();
+        }
+
         public void show(DockItem folder_item, int index) {
-            if (popup != null) {
-                popup.destroy();
-                popup = null;
-            }
+            dismiss();
 
             string[] folder_apps = config.get_folder_apps(folder_item.folder_id);
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU, host.popup_parent());
+
+            // Text colour follows the theme so it stays readable on dark and light backgrounds
+            var label_css = new Gtk.CssProvider();
+            try {
+                label_css.load_from_data(host.popup_is_light() ?
+                    "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
+            } catch (Error e) {}
 
             var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
             vbox.margin = 12;
@@ -39,6 +58,7 @@ namespace Dokku {
             var title_label = new Gtk.Label("<b>" + GLib.Markup.escape_text(folder_item.name) + "</b>");
             title_label.use_markup = true;
             title_label.margin_bottom = 8;
+            title_label.get_style_context().add_provider(label_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             vbox.pack_start(title_label, false, false, 0);
 
             int cols = 4;
@@ -62,6 +82,7 @@ namespace Dokku {
                 name_label.ellipsize = Pango.EllipsizeMode.END;
                 name_label.max_width_chars = 10;
                 name_label.set_size_request(64, -1);
+                name_label.get_style_context().add_provider(label_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
                 btn_box.pack_start(name_label, false, false, 0);
 
                 var event_box = new Gtk.EventBox();
@@ -70,10 +91,7 @@ namespace Dokku {
                     usage_tracker.record_launch(app.id);
                     app.launch();
                     launched(folder_item);
-                    if (popup != null) {
-                        popup.destroy();
-                        popup = null;
-                    }
+                    dismiss();
                     return true;
                 });
 
@@ -91,15 +109,10 @@ namespace Dokku {
             });
 
             popup.add(vbox);
-            host.show_popup(popup, index, 4);
-
-            popup.focus_out_event.connect(() => {
-                if (popup != null) {
-                    popup.destroy();
-                    popup = null;
-                }
-                return false;
-            });
+            open_index = index;
+            // Clicking anywhere else closes it. (focus-out can't be used: popups never get focus.)
+            PopupHelper.connect_dismissal(popup, () => dismiss());
+            host.show_popup(popup, index, 4, true);
         }
     }
 }
