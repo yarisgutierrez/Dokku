@@ -37,48 +37,51 @@ namespace Dokku {
             load();
         }
 
-        private void load() {
+        // Reads one number, keeping `fallback` if the section or key is missing or
+        // the value isn't numeric. (has_key() throws when the whole group is absent,
+        // so a theme without e.g. [Border] must not abort the rest of the parse.)
+        private static double read_double(KeyFile keyfile, string group, string key, double fallback) {
             try {
-                var keyfile = new KeyFile();
+                if (keyfile.has_key(group, key))
+                    return keyfile.get_double(group, key);
+            } catch (Error e) {
+                // fall through to the default
+            }
+            return fallback;
+        }
+
+        private void load() {
+            var keyfile = new KeyFile();
+            try {
                 keyfile.load_from_file(path, KeyFileFlags.NONE);
+            } catch (Error e) {
+                name = id;
+                return;
+            }
 
+            try {
                 name = keyfile.get_string("Theme", "name");
-
-                if (keyfile.has_key("Background", "red"))
-                    bg_red = keyfile.get_double("Background", "red");
-                if (keyfile.has_key("Background", "green"))
-                    bg_green = keyfile.get_double("Background", "green");
-                if (keyfile.has_key("Background", "blue"))
-                    bg_blue = keyfile.get_double("Background", "blue");
-                if (keyfile.has_key("Background", "alpha"))
-                    bg_alpha = keyfile.get_double("Background", "alpha");
-
-                if (keyfile.has_key("Border", "red"))
-                    border_red = keyfile.get_double("Border", "red");
-                if (keyfile.has_key("Border", "green"))
-                    border_green = keyfile.get_double("Border", "green");
-                if (keyfile.has_key("Border", "blue"))
-                    border_blue = keyfile.get_double("Border", "blue");
-                if (keyfile.has_key("Border", "alpha"))
-                    border_alpha = keyfile.get_double("Border", "alpha");
-
-                if (keyfile.has_key("Indicator", "red"))
-                    indicator_red = keyfile.get_double("Indicator", "red");
-                if (keyfile.has_key("Indicator", "green"))
-                    indicator_green = keyfile.get_double("Indicator", "green");
-                if (keyfile.has_key("Indicator", "blue"))
-                    indicator_blue = keyfile.get_double("Indicator", "blue");
-                if (keyfile.has_key("Indicator", "alpha"))
-                    indicator_alpha = keyfile.get_double("Indicator", "alpha");
-
-                if (keyfile.has_key("Style", "corner_radius"))
-                    corner_radius = keyfile.get_double("Style", "corner_radius");
-                if (keyfile.has_key("Style", "border_width"))
-                    border_width = keyfile.get_double("Style", "border_width");
-
             } catch (Error e) {
                 name = id;
             }
+
+            bg_red = read_double(keyfile, "Background", "red", bg_red);
+            bg_green = read_double(keyfile, "Background", "green", bg_green);
+            bg_blue = read_double(keyfile, "Background", "blue", bg_blue);
+            bg_alpha = read_double(keyfile, "Background", "alpha", bg_alpha);
+
+            border_red = read_double(keyfile, "Border", "red", border_red);
+            border_green = read_double(keyfile, "Border", "green", border_green);
+            border_blue = read_double(keyfile, "Border", "blue", border_blue);
+            border_alpha = read_double(keyfile, "Border", "alpha", border_alpha);
+
+            indicator_red = read_double(keyfile, "Indicator", "red", indicator_red);
+            indicator_green = read_double(keyfile, "Indicator", "green", indicator_green);
+            indicator_blue = read_double(keyfile, "Indicator", "blue", indicator_blue);
+            indicator_alpha = read_double(keyfile, "Indicator", "alpha", indicator_alpha);
+
+            corner_radius = read_double(keyfile, "Style", "corner_radius", corner_radius);
+            border_width = read_double(keyfile, "Style", "border_width", border_width);
 
             // Clamp all values to safe ranges
             bg_red = bg_red.clamp(0.0, 1.0);
