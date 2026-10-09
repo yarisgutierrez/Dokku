@@ -143,9 +143,14 @@ namespace Dokku {
                 var keyfile = new KeyFile();
                 keyfile.load_from_file(path, KeyFileFlags.NONE);
 
-                name = keyfile.get_locale_string("Desktop Entry", "Name");
-                icon = keyfile.get_string("Desktop Entry", "Icon");
+                // Exec is the only key an application can't do without (it throws, and the
+                // entry is treated as unusable below). Name and Icon are optional in
+                // practice, so a missing one must not make the whole app disappear.
                 exec = keyfile.get_string("Desktop Entry", "Exec");
+                name = keyfile.has_key("Desktop Entry", "Name")
+                    ? keyfile.get_locale_string("Desktop Entry", "Name") : id;
+                icon = keyfile.has_key("Desktop Entry", "Icon")
+                    ? keyfile.get_string("Desktop Entry", "Icon") : IconLoader.FALLBACK;
                 // Remove field codes from exec
                 exec = exec.replace("%U", "").replace("%u", "")
                            .replace("%F", "").replace("%f", "")
@@ -168,7 +173,7 @@ namespace Dokku {
                 }
             } catch (Error e) {
                 name = id;
-                icon = "application-x-executable";
+                icon = IconLoader.FALLBACK;
                 exec = "";
                 categories = new string[0];
             }
