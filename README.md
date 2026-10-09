@@ -1,6 +1,7 @@
 # Dokku
 
-A macOS/GNOME-style dock and full-screen app launcher for XFCE4, written in Vala (GTK3, Cairo).
+A macOS/GNOME-style dock and full-screen app launcher for XFCE4, running on both X11 and
+Wayland. Written in Vala (GTK3, Cairo).
 
 ![Dokku](screenshots/1.png)
 
@@ -8,17 +9,17 @@ A macOS/GNOME-style dock and full-screen app launcher for XFCE4, written in Vala
 
 - **Dock** with magnification, running-app indicators, and Cairo-drawn themes
 - **Positioning** on any screen edge (bottom, top, left, right), with multi-monitor support
-- **Visibility:** auto-hide and "dodge windows" (hide when windows overlap)
+- **Visibility:** auto-hide, and "dodge windows" (hide when windows overlap; X11)
 - **Drag and drop:** reorder icons, or drag a pinned app off the dock to unpin it
 - **Folders:** group pinned apps into dock folders
-- **Window previews** on hover for apps with several windows
+- **Window previews** on hover for apps with several windows (X11)
 - **Notification badges, progress bars and launch/attention bounce**
 - **Recent files** in the right-click menu
 - **Media widget** (MPRIS2) with album art
-- **Frosted glass** blur via a compositor such as picom
+- **Frosted glass** blur via a compositor such as picom (X11)
 - **Launcher:** full-screen app grid with search and keyboard navigation
 - **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
-- **Global hotkeys** through keybinder
+- **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
 
 ## Build
 
@@ -133,7 +134,8 @@ window shows why next to each one.
 | Feature | X11 | Wayland |
 |---------|-----|---------|
 | Dock, magnification, folders, drag and drop, themes | yes | yes (layer-shell) |
-| Launcher, Settings, media widget, notification badges | yes | yes |
+| Launcher, Settings | yes | yes |
+| Media widget, notification badges (both use D-Bus) | yes | should work, untested |
 | Running-app indicators, window previews, attention bounce | yes | not yet |
 | Dodge windows, Show Desktop button | yes | not yet |
 | Global hotkeys | yes | no: bind a key in your compositor to `dokku --launcher` |
@@ -142,11 +144,15 @@ window shows why next to each one.
 Window tracking on Wayland would need the `zwlr_foreign_toplevel_manager_v1`
 protocol, which labwc and sway provide. It isn't implemented yet.
 
-**Wayland status: new and lightly tested.** The dock draws and lays out correctly
-under sway (checked in a headless session, bottom edge). Hover popups, clicks,
-drag and drop, and multi-monitor have not been exercised on Wayland yet, and the
-features marked "not yet" above are missing. X11 is the fully tested path. Reports
-from real Wayland sessions are welcome.
+**Both sessions are supported.** The dock, its popups and tooltips, folders, drag and
+drop, themes, the launcher and Settings work on each. Tested on X11 under XFCE (xfwm4)
+and on Wayland under sway and labwc, which is XFCE's Wayland compositor. Multi-monitor
+and vertical docks have had less testing on Wayland than on X11.
+
+On Wayland the compositor must support the `wlr-layer-shell` protocol. sway, labwc,
+Wayfire, Hyprland and KDE Plasma do. GNOME's Mutter does not, so Dokku can't place
+its dock there. The features marked "not yet" in the table need a window tracker
+that isn't written, and are turned off on Wayland.
 
 ## Usage
 
@@ -192,6 +198,8 @@ properties so compositor rules can target its windows:
 
 - **No album art in the media widget:** install `gvfs-backends` (see Build).
 - **Trash plugin does nothing:** it runs `gio trash`; install `libglib2.0-bin`.
+- **The dock doesn't appear on Wayland:** your compositor needs `wlr-layer-shell`
+  (see above). GNOME's Mutter doesn't provide it.
 - **Frosted glass has no effect:** it needs a compositor with blur support. See
   the compositor notes above.
 - **Dock doesn't appear at login:** see the autostart note under Install.
