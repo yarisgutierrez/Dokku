@@ -4,6 +4,14 @@ All notable changes to Dokku are listed here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- `dokku --launcher` and `dokku --settings` did nothing when a dock was already running,
+  which is the normal case. The options were read in the process you typed the command
+  in, not in the running dock. This also affects binding a compositor key to
+  `dokku --launcher`, which is how to open the launcher on Wayland.
+
 ## [0.2.0] - 2026-10-09
 
 ### Added
@@ -58,4 +66,5 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/yarisgutierrez/Dokku/releases/tag/v0.2.0
