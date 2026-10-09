@@ -35,6 +35,7 @@ add_project_arguments('--pkg', 'gdk-x11-3.0', language: 'vala')
 
 subdir('lib')
 subdir('src')
+subdir('tests')
 
 install_data('data/dokku.desktop',
   install_dir: join_paths(get_option('datadir'), 'applications')

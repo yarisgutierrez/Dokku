@@ -14,9 +14,7 @@ namespace Dokku {
 
         // Guard against invalid UTF-8 crashing Cairo (enters error state, drops ALL further drawing)
         private static string safe_text(string? text) {
-            if (text == null || text == "") return "";
-            if (text.validate()) return text;
-            return "?";
+            return TextUtil.sanitize(text);
         }
 
         // Safe wrappers: ensure Cairo NEVER receives invalid UTF-8
@@ -416,23 +414,11 @@ namespace Dokku {
         }
 
         private string truncate_text(Cairo.Context cr, string text, double max_width) {
-            string safe = safe_text(text);
-            if (safe == "") return "";
-            Cairo.TextExtents extents;
-            safe_text_extents(cr, safe, out extents);
-            if (extents.width <= max_width) return safe;
-
-            // Remove whole UTF-8 characters from the end (not bytes)
-            int char_count = safe.char_count();
-            string result = safe;
-            while (char_count > 1) {
-                char_count--;
-                int byte_offset = safe.index_of_nth_char(char_count);
-                result = safe.substring(0, byte_offset);
-                safe_text_extents(cr, result + "...", out extents);
-                if (extents.width <= max_width) break;
-            }
-            return result + "...";
+            return TextUtil.truncate(text, max_width, (s) => {
+                Cairo.TextExtents extents;
+                safe_text_extents(cr, s, out extents);
+                return extents.width;
+            });
         }
 
         private void draw_media_compact(Cairo.Context cr, MediaPlugin mp,

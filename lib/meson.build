@@ -8,6 +8,7 @@ version_vala = configure_file(
 
 libdokku_sources = files(
   'core/file-utils.vala',
+  'core/text-utils.vala',
   'core/application.vala',
   'core/dbus-service.vala',
   'dock/dock-window.vala',
