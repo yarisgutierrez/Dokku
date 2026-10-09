@@ -1,5 +1,11 @@
 subdir('hotkeys')
 
+version_vala = configure_file(
+  input: 'core/version.vala.in',
+  output: 'version.vala',
+  configuration: configuration_data({'VERSION': meson.project_version()}),
+)
+
 libdokku_sources = files(
   'core/file-utils.vala',
   'core/application.vala',
@@ -37,6 +43,7 @@ libdokku_sources = files(
 )
 
 libdokku_sources += hotkeys_sources
+libdokku_sources += version_vala
 
 libdokku = static_library('dokku',
   libdokku_sources,

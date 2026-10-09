@@ -786,7 +786,7 @@ namespace Dokku {
             title.use_markup = true;
             box.pack_start(title, false, false, 0);
 
-            var version = new Gtk.Label("Version 0.1.3");
+            var version = new Gtk.Label("Version " + VERSION);
             version.get_style_context().add_class("dim-label");
             box.pack_start(version, false, false, 0);
 

@@ -1,4 +1,4 @@
-.TH DOKKU 1 "December 2024" "Dokku 0.1.3" "User Commands"
+.TH DOKKU 1 "@DATE@" "Dokku @VERSION@" "User Commands"
 .SH NAME
 dokku \- macOS-style dock and application launcher for XFCE4
 .SH SYNOPSIS

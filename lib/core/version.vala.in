@@ -1,0 +1,4 @@
+namespace Dokku {
+    // Generated from the version in meson.build; do not hard-code it elsewhere.
+    public const string VERSION = "@VERSION@";
+}

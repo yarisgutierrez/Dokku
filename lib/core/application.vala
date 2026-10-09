@@ -23,9 +23,15 @@ namespace Dokku {
             // Add command-line options
             add_main_option("launcher", 'l', 0, OptionArg.NONE, "Open the application launcher", null);
             add_main_option("settings", 's', 0, OptionArg.NONE, "Open the settings window", null);
+            add_main_option("version", 'v', 0, OptionArg.NONE, "Print the version and exit", null);
         }
         
         protected override int handle_local_options(VariantDict options) {
+            if (options.contains("version")) {
+                print("dokku %s\n", VERSION);
+                return 0;
+            }
+
             // Check for our custom options
             if (options.contains("launcher")) {
                 show_launcher = true;

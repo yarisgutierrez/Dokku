@@ -36,10 +36,81 @@ Spotify publish `https://` art URLs, and GIO fetches them through the GVfs HTTP 
 ```sh
 meson setup build
 ninja -C build
-./build/src/dokku
+./build/src/dokku      # run without installing
 ```
 
-Install system-wide with `sudo ninja -C build install`.
+## Install
+
+```sh
+meson setup build --prefix=/usr
+ninja -C build
+sudo ninja -C build install
+```
+
+This installs the `dokku` binary, the desktop entry, the app icon, the man page
+and an autostart entry.
+
+**Choosing a prefix:** use `--prefix=/usr` if you want Dokku to start
+automatically at login. The autostart entry is installed under
+`<prefix>/etc/xdg/autostart`, and desktop environments read autostart entries
+from `/etc/xdg/autostart` (and the other `XDG_CONFIG_DIRS`). With the default prefix (`/usr/local`) the entry is
+installed where nothing looks for it. In that case copy it by hand instead:
+
+```sh
+mkdir -p ~/.config/autostart
+cp data/dokku-autostart.desktop ~/.config/autostart/
+```
+
+You may need to refresh the icon cache to see the app icon in menus:
+
+```sh
+sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
+```
+
+### Start, restart and autostart
+
+Dokku starts from your application menu, from `dokku` in a terminal, or at login
+if autostart is set up. It is a single-instance application: running `dokku`
+again while it's running only forwards the request to the running copy. To
+restart it, for example after reinstalling:
+
+```sh
+pkill dokku; dokku &
+```
+
+To turn autostart off for your user without uninstalling, copy the autostart
+file to `~/.config/autostart/` and change `Hidden=false` to `Hidden=true` in it.
+
+### Update
+
+Pull the new source, then rebuild and reinstall with the same commands. Your
+settings in `~/.config/dokku/` are kept.
+
+### Uninstall
+
+Meson has no uninstall target, but it records what it installed. From the build
+directory you installed from:
+
+```sh
+grep -v '^#' build/meson-logs/install-log.txt | while read -r f; do
+    [ -f "$f" ] && sudo rm -v "$f"
+done
+```
+
+Your settings, themes and plugins are left in place. Remove them too if you
+want a clean slate:
+
+```sh
+rm -r ~/.config/dokku ~/.local/share/dokku
+```
+
+## Files
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/dokku/config.ini` | settings, pinned apps, folders, enabled plugins |
+| `~/.local/share/dokku/themes/` | user-installed themes |
+| `~/.local/share/dokku/plugins/` | user script plugins |
 
 ## Usage
 
@@ -47,6 +118,7 @@ Install system-wide with `sudo ninja -C build install`.
 dokku                # start the dock
 dokku --launcher     # open the app launcher
 dokku --settings     # open the settings window
+dokku --version      # print the version
 ```
 
 Configuration lives in `~/.config/dokku/`. See `man dokku` for the config
@@ -78,6 +150,16 @@ properties so compositor rules can target its windows:
 | `lib/themes/` | theme loading |
 | `lib/hotkeys/` | hotkey manager |
 | `data/` | desktop files, man page, icons, default theme |
+
+## Troubleshooting
+
+- **No album art in the media widget:** install `gvfs-backends` (see Build).
+- **Trash plugin does nothing:** it runs `gio trash`; install `libglib2.0-bin`.
+- **Frosted glass has no effect:** it needs a compositor with blur support. See
+  the compositor notes above.
+- **Dock doesn't appear at login:** see the autostart note under Install.
+- **Something looks wrong after an upgrade:** restart the dock. A running dock
+  keeps using the old binary until it is restarted.
 
 ## Contributing
 

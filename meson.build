@@ -1,5 +1,5 @@
 project('dokku', 'vala', 'c',
-  version: '0.1.3',
+  version: '0.2.0',
   meson_version: '>= 0.50.0',
 )
 
@@ -48,4 +48,12 @@ install_data('data/icons/dokku.svg',
   install_dir: join_paths(get_option('datadir'), 'icons/hicolor/scalable/apps')
 )
 
-install_man('data/dokku.1')
+man_page = configure_file(
+  input: 'data/dokku.1.in',
+  output: 'dokku.1',
+  configuration: configuration_data({
+    'VERSION': meson.project_version(),
+    'DATE': 'October 2026',
+  }),
+)
+install_man(man_page)
