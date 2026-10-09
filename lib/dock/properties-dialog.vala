@@ -34,7 +34,7 @@ namespace Dokku {
 
             // App icon (clickable to browse) + name header
             var header_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12);
-            var icon_image = new Gtk.Image.from_icon_name(item.icon_name, Gtk.IconSize.DIALOG);
+            var icon_image = IconLoader.image(item.icon_name, Gtk.IconSize.DIALOG);
             var icon_event = new Gtk.EventBox();
             icon_event.add(icon_image);
             icon_event.tooltip_text = "Click to change icon";
@@ -307,16 +307,7 @@ namespace Dokku {
         }
 
         private static void update_header_icon(Gtk.Image image, string icon_name) {
-            if (icon_name.has_prefix("/") && FileUtils.test(icon_name, FileTest.EXISTS)) {
-                try {
-                    var pixbuf = new Gdk.Pixbuf.from_file_at_size(icon_name, 48, 48);
-                    image.set_from_pixbuf(pixbuf);
-                } catch (Error e) {
-                    image.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
-                }
-            } else {
-                image.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
-            }
+            IconLoader.apply(image, icon_name, Gtk.IconSize.DIALOG);
         }
 
         private static string format_file_size(int64 size) {

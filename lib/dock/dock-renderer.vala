@@ -107,37 +107,27 @@ namespace Dokku {
             if (icon_cache.contains(base_key)) {
                 base_pixbuf = icon_cache.get(base_key);
             } else {
-                // File path icons (custom overrides)
-                if (icon_name.has_prefix("/")) {
+                // Symbolic icons are recoloured to suit the theme; everything else (theme
+                // names, file paths, the fallback icon) goes through IconLoader.
+                if (is_symbolic) {
                     try {
-                        base_pixbuf = new Gdk.Pixbuf.from_file_at_size(icon_name, load_size, load_size);
-                    } catch (Error e) {}
-                }
-
-                if (base_pixbuf == null) {
-                    var itheme = Gtk.IconTheme.get_default();
-                    try {
-                        if (is_symbolic) {
-                            var info = itheme.lookup_icon(icon_name, load_size, Gtk.IconLookupFlags.FORCE_SIZE);
-                            if (info != null) {
-                                var fg = Gdk.RGBA();
-                                if (is_light_theme()) {
-                                    fg.red = 0.15f; fg.green = 0.15f; fg.blue = 0.15f; fg.alpha = 0.95f;
-                                } else {
-                                    fg.red = 1.0f; fg.green = 1.0f; fg.blue = 1.0f; fg.alpha = 0.95f;
-                                }
-                                bool was_symbolic;
-                                base_pixbuf = info.load_symbolic(fg, null, null, null, out was_symbolic);
+                        var info = Gtk.IconTheme.get_default().lookup_icon(icon_name, load_size, Gtk.IconLookupFlags.FORCE_SIZE);
+                        if (info != null) {
+                            var fg = Gdk.RGBA();
+                            if (is_light_theme()) {
+                                fg.red = 0.15f; fg.green = 0.15f; fg.blue = 0.15f; fg.alpha = 0.95f;
+                            } else {
+                                fg.red = 1.0f; fg.green = 1.0f; fg.blue = 1.0f; fg.alpha = 0.95f;
                             }
-                        }
-                        if (base_pixbuf == null) {
-                            base_pixbuf = itheme.load_icon(icon_name, load_size, Gtk.IconLookupFlags.FORCE_SIZE);
+                            bool was_symbolic;
+                            base_pixbuf = info.load_symbolic(fg, null, null, null, out was_symbolic);
                         }
                     } catch (Error e) {
-                        try {
-                            base_pixbuf = itheme.load_icon("application-x-executable", load_size, Gtk.IconLookupFlags.FORCE_SIZE);
-                        } catch (Error e2) {}
+                        // fall back to the plain icon below
                     }
+                }
+                if (base_pixbuf == null) {
+                    base_pixbuf = IconLoader.load(icon_name, load_size);
                 }
                 access_counter++;
                 icon_cache.set(base_key, base_pixbuf);

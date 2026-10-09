@@ -327,15 +327,7 @@ namespace Dokku {
                 }
             }
 
-            Gdk.Pixbuf? pixbuf = null;
-            var theme = Gtk.IconTheme.get_default();
-            try {
-                pixbuf = theme.load_icon(icon_name, size, Gtk.IconLookupFlags.FORCE_SIZE);
-            } catch (Error e) {
-                try {
-                    pixbuf = theme.load_icon("application-x-executable", size, Gtk.IconLookupFlags.FORCE_SIZE);
-                } catch (Error e2) {}
-            }
+            Gdk.Pixbuf? pixbuf = IconLoader.load(icon_name, size);
             icon_cache.set(key, pixbuf);
             icon_cache_order.push_tail(key);
             return pixbuf;

@@ -25,21 +25,10 @@ namespace Dokku {
             this.progress = (owned) progress_func;
 
             // Cache icon pixbuf
-            string icon_name = item.icon_name;
-            if (icon_name == null || icon_name == "") icon_name = "application-x-executable";
-            try {
-                var itheme = Gtk.IconTheme.get_default();
-                icon = itheme.load_icon(icon_name, icon_size, Gtk.IconLookupFlags.FORCE_SIZE);
-            } catch (Error e) {
-                try {
-                    var itheme = Gtk.IconTheme.get_default();
-                    icon = itheme.load_icon("application-x-executable",
-                        icon_size, Gtk.IconLookupFlags.FORCE_SIZE);
-                } catch (Error e2) {
-                    icon = null;
-                    this.progress = null;
-                    return false;
-                }
+            icon = IconLoader.load(item.icon_name, icon_size);
+            if (icon == null) {
+                this.progress = null;
+                return false;
             }
 
             is_poofing = false;

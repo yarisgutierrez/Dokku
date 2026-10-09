@@ -128,7 +128,7 @@ namespace Dokku {
                 var row = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
                 row.margin = 4;
 
-                var icon = new Gtk.Image.from_icon_name(item.icon_name, Gtk.IconSize.MENU);
+                var icon = IconLoader.image(item.icon_name, Gtk.IconSize.MENU);
                 row.pack_start(icon, false, false, 0);
 
                 var label = new Gtk.Label(window.get_name());

@@ -75,7 +75,7 @@ namespace Dokku {
 
                 var btn_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
 
-                var icon_img = new Gtk.Image.from_icon_name(app.icon, Gtk.IconSize.DIALOG);
+                var icon_img = IconLoader.image(app.icon, Gtk.IconSize.DIALOG);
                 btn_box.pack_start(icon_img, false, false, 0);
 
                 var name_label = new Gtk.Label(app.name);
