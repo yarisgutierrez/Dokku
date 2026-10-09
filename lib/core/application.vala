@@ -10,6 +10,7 @@ namespace Dokku {
         private UsageTracker usage_tracker;
         private DBusService? dbus_service;
         private uint dbus_owner_id = 0;
+        private uint monitor_sync_id = 0;
 
         private bool show_launcher = false;
         private bool show_settings = false;
@@ -52,6 +53,10 @@ namespace Dokku {
         }
 
         protected override void shutdown() {
+            if (monitor_sync_id != 0) {
+                Source.remove(monitor_sync_id);
+                monitor_sync_id = 0;
+            }
             if (dbus_owner_id != 0) {
                 Bus.unown_name(dbus_owner_id);
                 dbus_owner_id = 0;
@@ -167,6 +172,12 @@ namespace Dokku {
 
             sync_multi_monitor();
 
+            // Docks follow monitors as they are plugged in and out, not only at startup
+            // and when a setting changes.
+            var display = Gdk.Display.get_default();
+            display.monitor_added.connect(() => schedule_monitor_sync());
+            display.monitor_removed.connect(() => schedule_monitor_sync());
+
             if (show_launcher) {
                 launcher.toggle();
                 show_launcher = false;
@@ -175,6 +186,17 @@ namespace Dokku {
                 settings.show_all();
                 show_settings = false;
             }
+        }
+
+        // Monitors usually change in bursts (a dock being connected adds several outputs),
+        // so let things settle and resync once.
+        private void schedule_monitor_sync() {
+            if (monitor_sync_id != 0) return;
+            monitor_sync_id = Timeout.add(300, () => {
+                monitor_sync_id = 0;
+                sync_multi_monitor();
+                return false;
+            });
         }
 
         private void sync_multi_monitor() {
