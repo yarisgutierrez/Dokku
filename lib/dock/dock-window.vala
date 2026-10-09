@@ -1,7 +1,8 @@
 namespace Dokku {
-    public class DockWindow : Gtk.Window {
+    public class DockWindow : Gtk.Window, PopupHost {
         private WindowManager wm;
         private DockRenderer renderer;
+        private PropertiesDialog properties_dialog;
         private AppManager app_manager;
         private ConfigManager config;
         private PluginManager plugin_manager;
@@ -66,11 +67,9 @@ namespace Dokku {
         private uint progress_tick_id = 0;
         private UsageTracker usage_tracker;
 
-        private uint hover_preview_timeout_id = 0;
-        private uint media_play_update_id = 0;
-        private Gtk.Window? preview_popup = null;
-        private int preview_target_index = -1;
-        private uint preview_dismiss_timeout_id = 0;
+        private MediaPopup media_popup;
+        private FolderPopup folder_popup;
+        private PreviewPopup preview;
 
         private bool use_layer_shell = false;
         private bool rounded_corners = true;
@@ -123,6 +122,8 @@ namespace Dokku {
             this.app_manager = app_manager;
             this.usage_tracker = usage_tracker;
             renderer = new DockRenderer();
+            properties_dialog = new PropertiesDialog(this, app_manager, config, renderer);
+            properties_dialog.changed.connect(schedule_redraw);
             renderer.app_manager = app_manager;
             this.config = config;
             plugin_manager = new PluginManager(config);
@@ -197,6 +198,11 @@ namespace Dokku {
             });
 
             wm = new WindowManager();
+
+            preview = new PreviewPopup(this, wm);
+            media_popup = new MediaPopup(this);
+            folder_popup = new FolderPopup(this, app_manager, config, usage_tracker);
+            folder_popup.launched.connect((folder_item) => trigger_bounce(folder_item.id, true));
             wm.windows_changed.connect(update_running_apps);
             wm.window_geometry_changed.connect(schedule_dodge_check);
             wm.active_changed.connect(() => {
@@ -234,10 +240,6 @@ namespace Dokku {
                 if (dodge_check_timeout_id != 0) { Source.remove(dodge_check_timeout_id); dodge_check_timeout_id = 0; }
                 if (hide_timeout_id != 0) { Source.remove(hide_timeout_id); hide_timeout_id = 0; }
                 if (launch_rehide_timeout_id != 0) { Source.remove(launch_rehide_timeout_id); launch_rehide_timeout_id = 0; }
-                if (hover_preview_timeout_id != 0) { Source.remove(hover_preview_timeout_id); hover_preview_timeout_id = 0; }
-                if (preview_dismiss_timeout_id != 0) { Source.remove(preview_dismiss_timeout_id); preview_dismiss_timeout_id = 0; }
-                if (media_popup_dismiss_id != 0) { Source.remove(media_popup_dismiss_id); media_popup_dismiss_id = 0; }
-                if (media_play_update_id != 0) { Source.remove(media_play_update_id); media_play_update_id = 0; }
 
                 // Tick callbacks are auto-removed on widget destroy, but null IDs
                 slide_tick_id = 0;
@@ -245,8 +247,9 @@ namespace Dokku {
                 progress_tick_id = 0;
 
                 // Popups
-                if (media_popup != null) { media_popup.destroy(); media_popup = null; }
-                if (preview_popup != null) { preview_popup.destroy(); preview_popup = null; }
+                media_popup.shutdown();
+                folder_popup.shutdown();
+                preview.shutdown();
                 if (blur_bg != null) { blur_bg.destroy(); blur_bg = null; }
             });
 
@@ -1636,41 +1639,29 @@ namespace Dokku {
                 var hovered_item = items.nth_data(hovered_index);
                 if (hovered_item != null && hovered_item.running && hovered_item.windows.length() > 1) {
                     // Multi-window: window preview popup after 400ms
-                    if (preview_target_index != hovered_index) {
-                        cancel_preview_timer();
-                        dismiss_preview_popup();
-                        preview_target_index = hovered_index;
-                        int idx = hovered_index;
-                        hover_preview_timeout_id = Timeout.add(400, () => {
-                            hover_preview_timeout_id = 0;
-                            show_preview_popup(idx);
-                            return false;
-                        });
+                    if (preview.target_index != hovered_index) {
+                        preview.cancel_timer();
+                        preview.dismiss();
+                        preview.request(hovered_index, 400, true);
                     } else {
-                        cancel_preview_dismiss();
+                        preview.cancel_dismiss();
                     }
                 } else if (hovered_item != null && !hovered_item.is_separator
                            && !hovered_item.is_media_widget) {
                     // Single/zero-window or non-running: name tooltip after 300ms
-                    if (preview_target_index != hovered_index) {
-                        cancel_preview_timer();
-                        dismiss_preview_popup();
-                        preview_target_index = hovered_index;
-                        int idx = hovered_index;
-                        hover_preview_timeout_id = Timeout.add(300, () => {
-                            hover_preview_timeout_id = 0;
-                            show_name_tooltip(idx);
-                            return false;
-                        });
+                    if (preview.target_index != hovered_index) {
+                        preview.cancel_timer();
+                        preview.dismiss();
+                        preview.request(hovered_index, 300, false);
                     } else {
-                        cancel_preview_dismiss();
+                        preview.cancel_dismiss();
                     }
                 } else {
-                    cancel_preview_timer();
-                    dismiss_preview_popup();
+                    preview.cancel_timer();
+                    preview.dismiss();
                 }
             } else {
-                cancel_preview_timer();
+                preview.cancel_timer();
             }
 
             schedule_redraw();
@@ -1681,7 +1672,7 @@ namespace Dokku {
             hovering = true;
             if (hide_timeout_id != 0) { Source.remove(hide_timeout_id); hide_timeout_id = 0; }
             if (launch_rehide_timeout_id != 0) { Source.remove(launch_rehide_timeout_id); launch_rehide_timeout_id = 0; }
-            cancel_media_popup_dismiss();
+            media_popup.cancel_dismiss();
             if ((auto_hide || dodge_hiding) && hidden) {
                 hidden = false;
                 animate_slide(0.0);
@@ -1702,9 +1693,9 @@ namespace Dokku {
             mouse_y = -1;
             hovered_index = -1;
 
-            cancel_preview_timer();
-            schedule_preview_dismiss();
-            schedule_media_popup_dismiss();
+            preview.cancel_timer();
+            preview.schedule_dismiss();
+            media_popup.schedule_dismiss();
 
             // Only hide if auto-hide or dodge-hiding is active
             if ((auto_hide || dodge_hiding) && !hidden) {
@@ -1936,9 +1927,9 @@ namespace Dokku {
                 mouse_x = -1;
                 mouse_y = -1;
                 hovered_index = -1;
-                cancel_preview_timer();
-                schedule_preview_dismiss();
-                schedule_media_popup_dismiss();
+                preview.cancel_timer();
+                preview.schedule_dismiss();
+                media_popup.schedule_dismiss();
                 if ((auto_hide || dodge_hiding) && !hidden) {
                     hide_timeout_id = Timeout.add(config.get_hide_delay(), () => {
                         hidden = true;
@@ -1989,11 +1980,11 @@ namespace Dokku {
             if (item == null) return;
 
             if (item.is_launcher) { launcher_requested(); return; }
-            if (item.is_folder) { show_folder_popup(item, index); return; }
+            if (item.is_folder) { folder_popup.show(item, index); return; }
             if (item.is_media_widget && item.plugin is MediaPlugin) {
                 var mp = item.plugin as MediaPlugin;
                 if (is_vertical) {
-                    show_media_popup(mp, index);
+                    media_popup.show(mp, index);
                     return;
                 }
                 double item_start, item_w;
@@ -2113,7 +2104,7 @@ namespace Dokku {
 
             // Recent files submenu
             if (item.desktop_file != null && item.desktop_file != "") {
-                var recent_submenu = build_recent_files_menu(item);
+                var recent_submenu = RecentFilesMenu.build(item, app_manager, this);
                 if (recent_submenu != null) {
                     var recent_mi = new Gtk.MenuItem.with_label("Recent Files");
                     recent_mi.submenu = recent_submenu;
@@ -2160,7 +2151,7 @@ namespace Dokku {
             if (!item.is_launcher) {
                 context_menu.append(new Gtk.SeparatorMenuItem());
                 var props = new Gtk.MenuItem.with_label("Properties...");
-                props.activate.connect(() => show_properties_dialog(item));
+                props.activate.connect(() => properties_dialog.show(item));
                 context_menu.append(props);
             }
 
@@ -2430,142 +2421,25 @@ namespace Dokku {
             });
         }
 
-        // --- Recent files ---
-
-        private Gtk.Menu? build_recent_files_menu(DockItem item) {
-            var recent_manager = Gtk.RecentManager.get_default();
-            var all_items = recent_manager.get_items();
-
-            string? exec_base = null;
-            var app = app_manager.get_app(item.id);
-            if (app != null && app.exec != null && app.exec != "") {
-                exec_base = Path.get_basename(app.exec.split(" ")[0]);
-            }
-
-            string? desktop_id = null;
-            if (item.desktop_file != null) {
-                desktop_id = Path.get_basename(item.desktop_file);
-            }
-
-            var matched = new List<Gtk.RecentInfo>();
-            foreach (var info in all_items) {
-                if (!info.exists()) continue;
-                bool matches = false;
-                if (exec_base != null && info.has_application(exec_base)) matches = true;
-                if (!matches && desktop_id != null && info.has_application(desktop_id)) matches = true;
-                if (!matches && info.has_application(item.id)) matches = true;
-                if (matches) matched.append(info);
-            }
-
-            if (matched.length() == 0) {
-                var menu = new Gtk.Menu();
-                var empty = new Gtk.MenuItem.with_label("No recent files");
-                empty.sensitive = false;
-                menu.append(empty);
-                return menu;
-            }
-
-            matched.sort((a, b) => {
-                long at = (long)a.get_modified();
-                long bt = (long)b.get_modified();
-                if (at > bt) return -1;
-                if (at < bt) return 1;
-                return 0;
-            });
-
-            var menu = new Gtk.Menu();
-            int count = 0;
-            foreach (var info in matched) {
-                if (count >= 10) break;
-                string display_name = info.get_display_name();
-                string uri = info.get_uri();
-                var mi = new Gtk.MenuItem.with_label(display_name);
-                mi.activate.connect(() => {
-                    try {
-                        Gtk.show_uri_on_window(this, uri, Gdk.CURRENT_TIME);
-                    } catch (Error e) {
-                        warning("Failed to open recent file: %s", e.message);
-                    }
-                });
-                menu.append(mi);
-                count++;
-            }
-            return menu;
-        }
-
         // --- Window preview popup ---
 
-        private void cancel_preview_timer() {
-            if (hover_preview_timeout_id != 0) {
-                Source.remove(hover_preview_timeout_id);
-                hover_preview_timeout_id = 0;
-            }
-            preview_target_index = -1;
+        // --- PopupHost ---
+
+        public DockItem? popup_item(int index) {
+            return items.nth_data(index);
         }
 
-        private void dismiss_preview_popup() {
-            cancel_preview_dismiss();
-            if (preview_popup != null) {
-                preview_popup.destroy();
-                preview_popup = null;
-            }
+        public Theme? popup_theme() {
+            return current_theme;
         }
 
-        private void schedule_preview_dismiss() {
-            if (preview_popup == null) return;
-            if (preview_dismiss_timeout_id != 0) return;
-            preview_dismiss_timeout_id = Timeout.add(300, () => {
-                preview_dismiss_timeout_id = 0;
-                dismiss_preview_popup();
-                return false;
-            });
+        public bool popup_is_light() {
+            return is_light_theme();
         }
 
-        private void cancel_preview_dismiss() {
-            if (preview_dismiss_timeout_id != 0) {
-                Source.remove(preview_dismiss_timeout_id);
-                preview_dismiss_timeout_id = 0;
-            }
-        }
-
-        private Gtk.Window create_popup_window(Gdk.WindowTypeHint hint = Gdk.WindowTypeHint.POPUP_MENU) {
-            var popup = new Gtk.Window(Gtk.WindowType.POPUP);
-            popup.set_type_hint(hint);
-            popup.set_skip_taskbar_hint(true);
-            popup.set_skip_pager_hint(true);
-            popup.set_decorated(false);
-            popup.set_resizable(false);
-            var vis = popup.get_screen().get_rgba_visual();
-            if (vis != null) popup.set_visual(vis);
-            popup.set_app_paintable(true);
-            return popup;
-        }
-
-        private void draw_popup_background(Cairo.Context cr, Gtk.Widget popup, Theme? theme_ref, double radius) {
-            cr.set_operator(Cairo.Operator.SOURCE);
-            cr.set_source_rgba(0, 0, 0, 0);
-            cr.paint();
-            cr.set_operator(Cairo.Operator.OVER);
-
-            int w = popup.get_allocated_width();
-            int h = popup.get_allocated_height();
-
-            double r = 0.12, g = 0.12, b = 0.12;
-            if (theme_ref != null) {
-                r = theme_ref.bg_red; g = theme_ref.bg_green; b = theme_ref.bg_blue;
-            }
-            draw_rounded_rect(cr, 0, 0, w, h, radius);
-            cr.set_source_rgba(r, g, b, 0.92);
-            cr.fill_preserve();
-
-            if (theme_ref != null) {
-                cr.set_source_rgba(theme_ref.border_red, theme_ref.border_green,
-                                   theme_ref.border_blue, theme_ref.border_alpha);
-            } else {
-                cr.set_source_rgba(1, 1, 1, 0.1);
-            }
-            cr.set_line_width(1);
-            cr.stroke();
+        public void popup_position(int index, int popup_w, int popup_h, int gap,
+                                   out int out_x, out int out_y) {
+            compute_popup_position(index, popup_w, popup_h, gap, out out_x, out out_y);
         }
 
         private void compute_popup_position(int index, int popup_w, int popup_h, int gap,
@@ -2602,440 +2476,6 @@ namespace Dokku {
             }
         }
 
-        private void show_name_tooltip(int index) {
-            var item = items.nth_data(index);
-            if (item == null) return;
-
-            dismiss_preview_popup();
-
-            preview_popup = create_popup_window(Gdk.WindowTypeHint.TOOLTIP);
-
-            var label = new Gtk.Label(item.name);
-            label.margin = 6;
-            var css = new Gtk.CssProvider();
-            try {
-                css.load_from_data(is_light_theme() ?
-                    "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
-            } catch (Error e) {}
-            label.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-            preview_popup.add(label);
-
-            var theme_ref = current_theme;
-            preview_popup.draw.connect((cr) => {
-                draw_popup_background(cr, preview_popup, theme_ref, 6);
-                return false;
-            });
-
-            preview_popup.show_all();
-
-            int popup_w, popup_h;
-            preview_popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            compute_popup_position(index, popup_w, popup_h, 8, out px, out py);
-            preview_popup.move(px, py);
-
-            preview_popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                     Gdk.EventMask.LEAVE_NOTIFY_MASK);
-            preview_popup.enter_notify_event.connect((ev) => {
-                cancel_preview_dismiss();
-                return false;
-            });
-            preview_popup.leave_notify_event.connect((ev) => {
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                schedule_preview_dismiss();
-                return false;
-            });
-        }
-
-        private void show_preview_popup(int index) {
-            var item = items.nth_data(index);
-            if (item == null || item.windows.length() <= 1) return;
-
-            dismiss_preview_popup();
-
-            preview_popup = create_popup_window(Gdk.WindowTypeHint.TOOLTIP);
-
-            bool popup_light = is_light_theme();
-            var label_css = new Gtk.CssProvider();
-            try {
-                label_css.load_from_data(popup_light ?
-                    "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
-            } catch (Error e) {}
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
-            box.margin = 8;
-
-            foreach (var window in item.windows) {
-                var row = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
-                row.margin = 4;
-
-                var icon = new Gtk.Image.from_icon_name(item.icon_name, Gtk.IconSize.MENU);
-                row.pack_start(icon, false, false, 0);
-
-                var label = new Gtk.Label(window.get_name());
-                label.halign = Gtk.Align.START;
-                label.ellipsize = Pango.EllipsizeMode.END;
-                label.max_width_chars = 30;
-                label.get_style_context().add_provider(label_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-                row.pack_start(label, true, true, 0);
-
-                var close_btn = new Gtk.Button.from_icon_name("window-close-symbolic", Gtk.IconSize.MENU);
-                close_btn.relief = Gtk.ReliefStyle.NONE;
-                close_btn.clicked.connect(() => {
-                    window.close(Gtk.get_current_event_time());
-                    dismiss_preview_popup();
-                });
-                row.pack_end(close_btn, false, false, 0);
-
-                var event_box = new Gtk.EventBox();
-                event_box.add(row);
-                event_box.button_press_event.connect((ev) => {
-                    if (ev.button == 1) {
-                        wm.activate_window(window);
-                        dismiss_preview_popup();
-                    }
-                    return true;
-                });
-
-                box.pack_start(event_box, false, false, 0);
-            }
-
-            var theme_ref = current_theme;
-            preview_popup.draw.connect((cr) => {
-                draw_popup_background(cr, preview_popup, theme_ref, 8);
-                return false;
-            });
-
-            preview_popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                     Gdk.EventMask.LEAVE_NOTIFY_MASK);
-
-            preview_popup.add(box);
-            preview_popup.show_all();
-
-            int popup_w, popup_h;
-            preview_popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            compute_popup_position(index, popup_w, popup_h, 8, out px, out py);
-            preview_popup.move(px, py);
-
-            // Mouse entering popup cancels any pending dismiss
-            preview_popup.enter_notify_event.connect((ev) => {
-                cancel_preview_dismiss();
-                return false;
-            });
-
-            // Mouse leaving popup schedules a delayed dismiss
-            preview_popup.leave_notify_event.connect((ev) => {
-                // Ignore leave events caused by entering child widgets
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                schedule_preview_dismiss();
-                return false;
-            });
-        }
-
-        // --- Media popup (vertical docks) ---
-
-        private Gtk.Window? media_popup = null;
-        private uint media_popup_fade_tick = 0;
-        private int64 media_popup_fade_start = 0;
-        private bool media_popup_fading_out = false;
-        private bool media_popup_hover = false;
-        private uint media_popup_dismiss_id = 0;
-        private const int MEDIA_POPUP_FADE_MS = 180;
-
-        private void dismiss_media_popup() {
-            if (media_popup == null) return;
-            if (media_popup_fading_out) return;  // already fading
-            media_popup_fading_out = true;
-            media_popup_fade_start = GLib.get_monotonic_time();
-            if (media_popup_fade_tick != 0) return;  // reuse tick
-            media_popup_fade_tick = media_popup.add_tick_callback((widget, clock) => {
-                int64 elapsed = clock.get_frame_time() - media_popup_fade_start;
-                double t = double.min(1.0, elapsed / (MEDIA_POPUP_FADE_MS * 1000.0));
-                if (media_popup != null) {
-                    ((Gtk.Widget)media_popup).opacity = 1.0 - t;
-                }
-                if (t >= 1.0) {
-                    media_popup_fade_tick = 0;
-                    media_popup_fading_out = false;
-                    if (media_popup != null) {
-                        media_popup.destroy();
-                        media_popup = null;
-                    }
-                    return false;
-                }
-                return true;
-            });
-        }
-
-        private void schedule_media_popup_dismiss() {
-            if (media_popup == null || media_popup_dismiss_id != 0) return;
-            media_popup_dismiss_id = Timeout.add(300, () => {
-                media_popup_dismiss_id = 0;
-                if (!media_popup_hover) {
-                    dismiss_media_popup();
-                }
-                return false;
-            });
-        }
-
-        private void cancel_media_popup_dismiss() {
-            if (media_popup_dismiss_id != 0) {
-                Source.remove(media_popup_dismiss_id);
-                media_popup_dismiss_id = 0;
-            }
-        }
-
-        private void show_media_popup(MediaPlugin mp, int index) {
-            // Toggle: if already open, dismiss it
-            if (media_popup != null) {
-                dismiss_media_popup();
-                return;
-            }
-
-            media_popup_hover = false;
-
-            media_popup = create_popup_window(Gdk.WindowTypeHint.POPUP_MENU);
-
-            bool popup_light = is_light_theme();
-
-            // CSS for button and label colors
-            var css_provider = new Gtk.CssProvider();
-            if (popup_light) {
-                try {
-                    css_provider.load_from_data(
-                        "button { color: #1a1a1a; } button:hover { background: rgba(0,0,0,0.08); } " +
-                        ".media-title { color: #1a1a1a; } .media-artist { color: #4d4d4d; }");
-                } catch (Error e) {}
-            } else {
-                try {
-                    css_provider.load_from_data(
-                        "button { color: #ffffff; } button:hover { background: rgba(255,255,255,0.1); } " +
-                        ".media-title { color: #ffffff; } .media-artist { color: #b3b3b3; }");
-                } catch (Error e) {}
-            }
-
-            var hbox = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 10);
-            hbox.margin = 10;
-
-            // Album art (64x64)
-            int art_size = 64;
-            var art = mp.get_art(art_size);
-            Gtk.Image art_image;
-            if (art != null) {
-                art_image = new Gtk.Image.from_pixbuf(art);
-            } else {
-                art_image = new Gtk.Image.from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.DIALOG);
-            }
-            art_image.set_size_request(art_size, art_size);
-            hbox.pack_start(art_image, false, false, 0);
-
-            // Text box (title + artist)
-            var text_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
-            text_box.valign = Gtk.Align.CENTER;
-
-            string title_str = mp.track_title != "" ? mp.track_title : mp.player_name;
-            var title_label = new Gtk.Label(null);
-            title_label.set_markup("<b>" + GLib.Markup.escape_text(title_str) + "</b>");
-            title_label.halign = Gtk.Align.START;
-            title_label.ellipsize = Pango.EllipsizeMode.END;
-            title_label.max_width_chars = 25;
-            title_label.get_style_context().add_class("media-title");
-            title_label.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-            text_box.pack_start(title_label, false, false, 0);
-
-            if (mp.track_artist != "") {
-                var artist_label = new Gtk.Label(mp.track_artist);
-                artist_label.halign = Gtk.Align.START;
-                artist_label.ellipsize = Pango.EllipsizeMode.END;
-                artist_label.max_width_chars = 25;
-                artist_label.get_style_context().add_class("media-artist");
-                artist_label.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-                text_box.pack_start(artist_label, false, false, 0);
-            }
-
-            hbox.pack_start(text_box, true, true, 0);
-
-            // Control buttons
-            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
-            btn_box.valign = Gtk.Align.CENTER;
-
-            var prev_btn = new Gtk.Button.from_icon_name("media-skip-backward-symbolic", Gtk.IconSize.LARGE_TOOLBAR);
-            prev_btn.relief = Gtk.ReliefStyle.NONE;
-            prev_btn.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-            prev_btn.clicked.connect(() => mp.previous());
-            btn_box.pack_start(prev_btn, false, false, 0);
-
-            var play_btn = new Gtk.Button.from_icon_name(
-                mp.is_playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic",
-                Gtk.IconSize.LARGE_TOOLBAR);
-            play_btn.relief = Gtk.ReliefStyle.NONE;
-            play_btn.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-            play_btn.clicked.connect(() => {
-                mp.activate();
-                // Update icon after toggle (small delay for state to propagate)
-                if (media_play_update_id != 0) Source.remove(media_play_update_id);
-                media_play_update_id = Timeout.add(200, () => {
-                    media_play_update_id = 0;
-                    if (media_popup != null) {
-                        var img = new Gtk.Image.from_icon_name(
-                            mp.is_playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic",
-                            Gtk.IconSize.LARGE_TOOLBAR);
-                        play_btn.set_image(img);
-                    }
-                    return false;
-                });
-            });
-            btn_box.pack_start(play_btn, false, false, 0);
-
-            var next_btn = new Gtk.Button.from_icon_name("media-skip-forward-symbolic", Gtk.IconSize.LARGE_TOOLBAR);
-            next_btn.relief = Gtk.ReliefStyle.NONE;
-            next_btn.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
-            next_btn.clicked.connect(() => mp.next());
-            btn_box.pack_start(next_btn, false, false, 0);
-
-            hbox.pack_start(btn_box, false, false, 0);
-
-            // Themed popup background
-            var theme_ref = current_theme;
-            media_popup.draw.connect((cr) => {
-                draw_popup_background(cr, media_popup, theme_ref, 10);
-                return false;
-            });
-
-            media_popup.add(hbox);
-
-            // Start fully transparent for fade-in
-            ((Gtk.Widget)media_popup).opacity = 0.0;
-            media_popup.show_all();
-
-            int popup_w, popup_h;
-            media_popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            compute_popup_position(index, popup_w, popup_h, 8, out px, out py);
-            media_popup.move(px, py);
-
-            // Fade in
-            media_popup_fading_out = false;
-            media_popup_fade_start = GLib.get_monotonic_time();
-            media_popup_fade_tick = media_popup.add_tick_callback((widget, clock) => {
-                int64 elapsed = clock.get_frame_time() - media_popup_fade_start;
-                double t = double.min(1.0, elapsed / (MEDIA_POPUP_FADE_MS * 1000.0));
-                if (media_popup != null) {
-                    ((Gtk.Widget)media_popup).opacity = t;
-                }
-                if (t >= 1.0) {
-                    media_popup_fade_tick = 0;
-                    return false;
-                }
-                return true;
-            });
-
-            // Track mouse enter/leave on popup for dismiss-on-leave
-            media_popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                   Gdk.EventMask.LEAVE_NOTIFY_MASK);
-            media_popup.enter_notify_event.connect((ev) => {
-                media_popup_hover = true;
-                cancel_media_popup_dismiss();
-                return false;
-            });
-            media_popup.leave_notify_event.connect((ev) => {
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                media_popup_hover = false;
-                schedule_media_popup_dismiss();
-                return false;
-            });
-        }
-
-        // --- Folder popup ---
-
-        private Gtk.Window? folder_popup = null;
-
-        private void show_folder_popup(DockItem folder_item, int index) {
-            if (folder_popup != null) {
-                folder_popup.destroy();
-                folder_popup = null;
-            }
-
-            string[] folder_apps = config.get_folder_apps(folder_item.folder_id);
-
-            folder_popup = create_popup_window(Gdk.WindowTypeHint.POPUP_MENU);
-
-            var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
-            vbox.margin = 12;
-
-            var title_label = new Gtk.Label("<b>" + GLib.Markup.escape_text(folder_item.name) + "</b>");
-            title_label.use_markup = true;
-            title_label.margin_bottom = 8;
-            vbox.pack_start(title_label, false, false, 0);
-
-            int cols = 4;
-            var grid = new Gtk.Grid();
-            grid.row_spacing = 8;
-            grid.column_spacing = 8;
-            grid.halign = Gtk.Align.CENTER;
-
-            int col = 0;
-            int row_n = 0;
-            foreach (var app_id in folder_apps) {
-                var app = app_manager.get_app(app_id);
-                if (app == null) continue;
-
-                var btn_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
-
-                var icon_img = new Gtk.Image.from_icon_name(app.icon, Gtk.IconSize.DIALOG);
-                btn_box.pack_start(icon_img, false, false, 0);
-
-                var name_label = new Gtk.Label(app.name);
-                name_label.ellipsize = Pango.EllipsizeMode.END;
-                name_label.max_width_chars = 10;
-                name_label.set_size_request(64, -1);
-                btn_box.pack_start(name_label, false, false, 0);
-
-                var event_box = new Gtk.EventBox();
-                event_box.add(btn_box);
-                event_box.button_press_event.connect((ev) => {
-                    usage_tracker.record_launch(app.id);
-                    app.launch();
-                    trigger_bounce(folder_item.id, true);
-                    if (folder_popup != null) {
-                        folder_popup.destroy();
-                        folder_popup = null;
-                    }
-                    return true;
-                });
-
-                grid.attach(event_box, col, row_n, 1, 1);
-                col++;
-                if (col >= cols) { col = 0; row_n++; }
-            }
-
-            vbox.pack_start(grid, false, false, 0);
-
-            var theme_ref = current_theme;
-            folder_popup.draw.connect((cr) => {
-                draw_popup_background(cr, folder_popup, theme_ref, 12);
-                return false;
-            });
-
-            folder_popup.add(vbox);
-            folder_popup.show_all();
-
-            int popup_w, popup_h;
-            folder_popup.get_size(out popup_w, out popup_h);
-            int px, py;
-            compute_popup_position(index, popup_w, popup_h, 4, out px, out py);
-            folder_popup.move(px, py);
-
-            folder_popup.focus_out_event.connect(() => {
-                if (folder_popup != null) {
-                    folder_popup.destroy();
-                    folder_popup = null;
-                }
-                return false;
-            });
-        }
-
         private void show_rename_folder_dialog(DockItem folder_item) {
             var dialog = new Gtk.Dialog.with_buttons("Rename Folder", this,
                 Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
@@ -3059,305 +2499,6 @@ namespace Dokku {
                 }
             }
             dialog.destroy();
-        }
-
-        private void show_properties_dialog(DockItem item) {
-            var dialog = new Gtk.Dialog.with_buttons("Properties — " + item.name, this,
-                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                "_Close", Gtk.ResponseType.CLOSE);
-            dialog.set_default_size(400, -1);
-
-            var content = dialog.get_content_area();
-            content.spacing = 8;
-            content.margin = 12;
-
-            var app = app_manager.get_app(item.id);
-            string? current_custom = config.get_custom_icon(item.id);
-            string original_icon = app != null ? app.icon : item.icon_name;
-
-            // App icon (clickable to browse) + name header
-            var header_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12);
-            var icon_image = new Gtk.Image.from_icon_name(item.icon_name, Gtk.IconSize.DIALOG);
-            var icon_event = new Gtk.EventBox();
-            icon_event.add(icon_image);
-            icon_event.tooltip_text = "Click to change icon";
-            header_box.pack_start(icon_event, false, false, 0);
-            var name_label = new Gtk.Label("<b>" + GLib.Markup.escape_text(item.name) + "</b>");
-            name_label.use_markup = true;
-            name_label.halign = Gtk.Align.START;
-            header_box.pack_start(name_label, false, false, 0);
-            content.pack_start(header_box, false, false, 0);
-
-            content.pack_start(new Gtk.Separator(Gtk.Orientation.HORIZONTAL), false, false, 4);
-
-            // Properties grid
-            var grid = new Gtk.Grid();
-            grid.row_spacing = 6;
-            grid.column_spacing = 12;
-            int row = 0;
-
-            // App ID
-            var id_label = new Gtk.Label("App ID:");
-            id_label.halign = Gtk.Align.END;
-            id_label.get_style_context().add_class("dim-label");
-            grid.attach(id_label, 0, row, 1, 1);
-            var id_value = new Gtk.Label(item.id);
-            id_value.halign = Gtk.Align.START;
-            id_value.selectable = true;
-            grid.attach(id_value, 1, row, 1, 1);
-            row++;
-
-            // Desktop file
-            if (item.desktop_file != null && item.desktop_file != "") {
-                var df_label = new Gtk.Label("Desktop File:");
-                df_label.halign = Gtk.Align.END;
-                df_label.get_style_context().add_class("dim-label");
-                grid.attach(df_label, 0, row, 1, 1);
-                var df_value = new Gtk.Label(item.desktop_file);
-                df_value.halign = Gtk.Align.START;
-                df_value.selectable = true;
-                df_value.ellipsize = Pango.EllipsizeMode.MIDDLE;
-                df_value.max_width_chars = 35;
-                grid.attach(df_value, 1, row, 1, 1);
-                row++;
-            }
-
-            // Command
-            if (app != null && app.exec != null && app.exec != "") {
-                var exec_label = new Gtk.Label("Command:");
-                exec_label.halign = Gtk.Align.END;
-                exec_label.get_style_context().add_class("dim-label");
-                grid.attach(exec_label, 0, row, 1, 1);
-                var exec_value = new Gtk.Label(app.exec);
-                exec_value.halign = Gtk.Align.START;
-                exec_value.selectable = true;
-                exec_value.ellipsize = Pango.EllipsizeMode.END;
-                exec_value.max_width_chars = 35;
-                grid.attach(exec_value, 1, row, 1, 1);
-                row++;
-            }
-
-            // File metadata: binary location, dates, size
-            if (app != null && app.exec != null && app.exec != "") {
-                string exec_basename = app.exec.split(" ")[0];
-                string? binary_path = Environment.find_program_in_path(exec_basename);
-                if (binary_path != null) {
-                    // Location
-                    var loc_label = new Gtk.Label("Location:");
-                    loc_label.halign = Gtk.Align.END;
-                    loc_label.get_style_context().add_class("dim-label");
-                    grid.attach(loc_label, 0, row, 1, 1);
-                    var loc_value = new Gtk.Label(binary_path);
-                    loc_value.halign = Gtk.Align.START;
-                    loc_value.selectable = true;
-                    loc_value.ellipsize = Pango.EllipsizeMode.MIDDLE;
-                    loc_value.max_width_chars = 35;
-                    grid.attach(loc_value, 1, row, 1, 1);
-                    row++;
-
-                    try {
-                        var file = File.new_for_path(binary_path);
-                        var info = file.query_info(
-                            "time::modified,time::access,standard::size",
-                            FileQueryInfoFlags.NONE);
-
-                        // Modified
-                        var mtime = info.get_modification_date_time();
-                        if (mtime != null) {
-                            var mod_label = new Gtk.Label("Modified:");
-                            mod_label.halign = Gtk.Align.END;
-                            mod_label.get_style_context().add_class("dim-label");
-                            grid.attach(mod_label, 0, row, 1, 1);
-                            var mod_value = new Gtk.Label(mtime.to_local().format("%Y-%m-%d %H:%M:%S"));
-                            mod_value.halign = Gtk.Align.START;
-                            mod_value.selectable = true;
-                            grid.attach(mod_value, 1, row, 1, 1);
-                            row++;
-                        }
-
-                        // Accessed
-                        var atime_val = info.get_attribute_uint64("time::access");
-                        if (atime_val > 0) {
-                            var atime = new DateTime.from_unix_local((int64)atime_val);
-                            var acc_label = new Gtk.Label("Accessed:");
-                            acc_label.halign = Gtk.Align.END;
-                            acc_label.get_style_context().add_class("dim-label");
-                            grid.attach(acc_label, 0, row, 1, 1);
-                            var acc_value = new Gtk.Label(atime.format("%Y-%m-%d %H:%M:%S"));
-                            acc_value.halign = Gtk.Align.START;
-                            acc_value.selectable = true;
-                            grid.attach(acc_value, 1, row, 1, 1);
-                            row++;
-                        }
-
-                        // Size
-                        int64 file_size = info.get_size();
-                        var size_label = new Gtk.Label("Size:");
-                        size_label.halign = Gtk.Align.END;
-                        size_label.get_style_context().add_class("dim-label");
-                        grid.attach(size_label, 0, row, 1, 1);
-                        var size_value = new Gtk.Label(format_file_size(file_size));
-                        size_value.halign = Gtk.Align.START;
-                        size_value.selectable = true;
-                        grid.attach(size_value, 1, row, 1, 1);
-                        row++;
-                    } catch (Error e) {}
-                }
-            }
-
-            content.pack_start(grid, false, false, 0);
-
-            // Icon override section
-            content.pack_start(new Gtk.Separator(Gtk.Orientation.HORIZONTAL), false, false, 4);
-
-            var icon_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
-            var icon_label = new Gtk.Label("Icon:");
-            icon_label.halign = Gtk.Align.END;
-            icon_label.get_style_context().add_class("dim-label");
-            icon_box.pack_start(icon_label, false, false, 0);
-
-            var icon_entry = new Gtk.Entry();
-            icon_entry.text = item.icon_name;
-            icon_entry.hexpand = true;
-            icon_box.pack_start(icon_entry, true, true, 0);
-
-            var browse_btn = new Gtk.Button.from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON);
-            browse_btn.tooltip_text = "Browse for icon";
-            icon_box.pack_start(browse_btn, false, false, 0);
-
-            var icon_preview = new Gtk.Image.from_icon_name(item.icon_name, Gtk.IconSize.LARGE_TOOLBAR);
-            icon_box.pack_start(icon_preview, false, false, 0);
-
-            // Update preview when entry changes
-            icon_entry.changed.connect(() => {
-                string text = icon_entry.text.strip();
-                if (text.has_prefix("/") && FileUtils.test(text, FileTest.EXISTS)) {
-                    try {
-                        var pixbuf = new Gdk.Pixbuf.from_file_at_size(text, 24, 24);
-                        icon_preview.set_from_pixbuf(pixbuf);
-                    } catch (Error e) {
-                        icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
-                    }
-                } else {
-                    icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
-                }
-            });
-
-            // Browse for icon file
-            browse_btn.clicked.connect(() => {
-                var chooser = new Gtk.FileChooserDialog("Choose Icon", dialog,
-                    Gtk.FileChooserAction.OPEN,
-                    "_Cancel", Gtk.ResponseType.CANCEL,
-                    "_Open", Gtk.ResponseType.ACCEPT);
-
-                var filter = new Gtk.FileFilter();
-                filter.set_filter_name("Image files");
-                filter.add_pattern("*.png");
-                filter.add_pattern("*.svg");
-                filter.add_pattern("*.xpm");
-                filter.add_pattern("*.ico");
-                chooser.add_filter(filter);
-
-                var all_filter = new Gtk.FileFilter();
-                all_filter.set_filter_name("All files");
-                all_filter.add_pattern("*");
-                chooser.add_filter(all_filter);
-
-                chooser.set_current_folder("/usr/share/icons");
-
-                // Preview widget
-                var preview_img = new Gtk.Image();
-                preview_img.set_size_request(64, 64);
-                chooser.set_preview_widget(preview_img);
-                chooser.update_preview.connect(() => {
-                    string? path = chooser.get_preview_filename();
-                    if (path != null) {
-                        try {
-                            var pixbuf = new Gdk.Pixbuf.from_file_at_size(path, 64, 64);
-                            preview_img.set_from_pixbuf(pixbuf);
-                            chooser.set_preview_widget_active(true);
-                        } catch (Error e) {
-                            chooser.set_preview_widget_active(false);
-                        }
-                    }
-                });
-
-                if (chooser.run() == Gtk.ResponseType.ACCEPT) {
-                    icon_entry.text = chooser.get_filename();
-                }
-                chooser.destroy();
-            });
-
-            // Clicking header icon also opens browse dialog
-            icon_event.button_press_event.connect((ev) => {
-                browse_btn.clicked();
-                return true;
-            });
-
-            content.pack_start(icon_box, false, false, 0);
-
-            // Apply / Reset buttons
-            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
-            btn_box.halign = Gtk.Align.END;
-
-            if (current_custom != null) {
-                var reset_btn = new Gtk.Button.with_label("Reset Icon");
-                reset_btn.clicked.connect(() => {
-                    config.clear_custom_icon(item.id);
-                    item.icon_name = original_icon;
-                    icon_entry.text = original_icon;
-                    update_header_icon(icon_image, original_icon);
-                    renderer.clear_icon_cache(current_custom);
-                    schedule_redraw();
-                });
-                btn_box.pack_start(reset_btn, false, false, 0);
-            }
-
-            var apply_btn = new Gtk.Button.with_label("Apply Icon");
-            apply_btn.get_style_context().add_class("suggested-action");
-            apply_btn.clicked.connect(() => {
-                string new_icon = icon_entry.text.strip();
-                if (new_icon != "" && new_icon != original_icon) {
-                    config.set_custom_icon(item.id, new_icon);
-                    renderer.clear_icon_cache(item.icon_name);
-                    item.icon_name = new_icon;
-                    update_header_icon(icon_image, new_icon);
-                    schedule_redraw();
-                } else if (new_icon == original_icon) {
-                    config.clear_custom_icon(item.id);
-                    item.icon_name = original_icon;
-                    renderer.clear_icon_cache(item.icon_name);
-                    update_header_icon(icon_image, original_icon);
-                    schedule_redraw();
-                }
-            });
-            btn_box.pack_start(apply_btn, false, false, 0);
-
-            content.pack_start(btn_box, false, false, 0);
-
-            dialog.show_all();
-            dialog.run();
-            dialog.destroy();
-        }
-
-        private void update_header_icon(Gtk.Image image, string icon_name) {
-            if (icon_name.has_prefix("/") && FileUtils.test(icon_name, FileTest.EXISTS)) {
-                try {
-                    var pixbuf = new Gdk.Pixbuf.from_file_at_size(icon_name, 48, 48);
-                    image.set_from_pixbuf(pixbuf);
-                } catch (Error e) {
-                    image.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
-                }
-            } else {
-                image.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
-            }
-        }
-
-        private string format_file_size(int64 size) {
-            if (size < 1024) return "%s B".printf(size.to_string());
-            if (size < 1024 * 1024) return "%.1f KB".printf(size / 1024.0);
-            if (size < 1024 * 1024 * 1024) return "%.1f MB".printf(size / (1024.0 * 1024.0));
-            return "%.1f GB".printf(size / (1024.0 * 1024.0 * 1024.0));
         }
     }
 }
