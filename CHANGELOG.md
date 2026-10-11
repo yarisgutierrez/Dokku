@@ -6,6 +6,47 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Keyboard navigation in the launcher. Down from the search box moves into the grid, the
+  arrow keys move between icons (Right and Left at the edge turn the page), Up from the
+  top row returns to search, Enter opens the focused icon, and Page Up/Page Down,
+  Home and End turn pages. The focused icon is now clearly highlighted.
+- The right-click menu has an Open entry and lists the app's own actions from its
+  `.desktop` file (such as New Window or New Private Window). It also opens from the
+  keyboard with the Menu key or Shift+F10.
+
+### Changed
+- Apps are now filed into categories by the desktop's own application menu
+  (`/etc/xdg/menus/xfce-applications.menu`, read directly, with no new library) instead of a
+  table of Dokku's own. Settings entries stay together even when they also claim another
+  category (Volume Control), editors that list "Utility" first land under Development (Zed),
+  and the category tabs and folder names follow the menu, so Dokku matches the panel menu.
+  Without a menu file, Dokku falls back to its previous table.
+- In the launcher's All view, a category with three or more apps is collected into one folder.
+  Your ten most-used apps also stay in the grid, outside the folder, and entries the menu
+  lists at the top level (Terminal Emulator, File Manager, Web Browser, ...) and uncategorised
+  apps are never folded. Searching or choosing a category still shows every app. It is on by
+  default and can be turned off under Settings > Launcher > Group apps by category.
+- Search results are ranked by how well they match: an exact name first, then names that
+  start with what you typed, then a word within the name, then anywhere in the name, then
+  the app id or command. Launch count only breaks ties.
+
+### Fixed
+- Apps launched from Dokku inherited the directory Dokku was started from, so a file
+  manager such as Thunar opened there instead of in your home directory. Dokku now
+  switches to your home directory at startup.
+- The Applications menu listed apps that are no longer installed, because a leftover
+  `.desktop` file was enough. Apps are now discovered through GLib, so an entry whose
+  `TryExec` binary is missing is hidden, as are entries marked `Hidden` or limited to
+  other desktops with `OnlyShowIn`/`NotShowIn`. A `.desktop` file in
+  `~/.local/share/applications` can now hide a system app, and every directory in
+  `XDG_DATA_DIRS` (Flatpak exports, for one) is scanned.
+- Paging through the launcher was jerky. One touchpad swipe could flip several pages, or
+  restart the slide halfway, because its inertia tail kept counting, and a fast mouse
+  wheel restarted the slide on every notch. A swipe now flips one page and the rest of
+  that gesture is ignored, and wheel notches are spaced out. The page dots are no longer
+  rebuilt during the slide.
+
 ## [0.2.1] - 2026-10-09
 
 ### Fixed
