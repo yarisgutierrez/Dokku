@@ -238,6 +238,17 @@ namespace Dokku {
             save();
         }
 
+        // Collect big categories into one folder each in the launcher's All view
+        public bool get_group_apps() {
+            try { return keyfile.get_boolean("Launcher", "group_apps"); }
+            catch (Error e) { return true; }
+        }
+
+        public void set_group_apps(bool enabled) {
+            keyfile.set_boolean("Launcher", "group_apps", enabled);
+            save();
+        }
+
         public string[] get_hidden_apps() {
             try {
                 return keyfile.get_string_list("Launcher", "hidden");

@@ -562,6 +562,18 @@ namespace Dokku {
             hidden_btn.clicked.connect(show_hidden_apps_dialog);
             launcher_grid.attach(hidden_btn, 1, row++, 1, 1);
 
+            // Group Settings apps
+            launcher_grid.attach(make_setting_label("Group apps by category", "In All, collect categories with many apps into one folder each. Your ten most-used apps stay out of folders"), 0, row, 1, 1);
+            var group_switch = new Gtk.Switch();
+            group_switch.active = config.get_group_apps();
+            group_switch.halign = Gtk.Align.START;
+            group_switch.valign = Gtk.Align.CENTER;
+            group_switch.notify["active"].connect(() => {
+                config.set_group_apps(group_switch.active);
+                schedule_apply();
+            });
+            launcher_grid.attach(group_switch, 1, row++, 1, 1);
+
             launcher_card.pack_start(launcher_grid, true, true, 0);
             outer.pack_start(launcher_card, false, false, 0);
 

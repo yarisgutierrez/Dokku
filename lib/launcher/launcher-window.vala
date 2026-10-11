@@ -10,6 +10,11 @@ namespace Dokku {
         private string active_category = "All";
         private List<weak AppInfo> filtered_apps;
         private List<string> ordered_items;
+        // Apps currently collected into each category group, by category name
+        private HashTable<string, GenericArray<weak AppInfo>> category_groups =
+            new HashTable<string, GenericArray<weak AppInfo>>(str_hash, str_equal);
+        // Search relevance per app id for the current query (empty when not searching)
+        private HashTable<string, int> match_scores = new HashTable<string, int>(str_hash, str_equal);
         private int cols = 7;
         private int rows = 5;
         private int current_page = 0;
@@ -27,11 +32,23 @@ namespace Dokku {
         // Smooth scroll accumulation for touchpad gestures
         private double scroll_accumulator_x = 0.0;
         private double scroll_accumulator_y = 0.0;
+        private int64 last_scroll_event_us = 0;
+        // Set after a flip: the rest of that gesture (inertia included) is ignored
+        private bool scroll_gesture_consumed = false;
+        private int64 wheel_locked_until_us = 0;
         private const double SCROLL_THRESHOLD = 1.5;
+        // A pause this long between scroll events means a new gesture started
+        private const int64 SCROLL_GESTURE_GAP_US = 150000;
+        // Wheel notches arriving faster than this don't each flip a page
+        private const int64 WHEEL_LOCKOUT_US = 300000;
 
         private HashTable<string, Gdk.Pixbuf?> icon_cache;
         private Queue<string> icon_cache_order;
         private const int MAX_ICON_CACHE_SIZE = 512;
+        // The most-used apps are also kept in the grid, outside their folder
+        private const int TOP_USED_APPS = 10;
+        // A category needs at least this many apps to become a folder
+        private const int GROUP_MIN_APPS = 3;
         private static bool css_applied = false;
 
         // Fade animation (frame-clock driven)
@@ -165,7 +182,6 @@ namespace Dokku {
                         border: 1px solid rgba(255,255,255,0.12);
                         color: white;
                         caret-color: white;
-                        -GtkWidget-cursor-color: white;
                     }
                     .launcher-search image {
                         color: white;
@@ -197,7 +213,7 @@ namespace Dokku {
                         -gtk-outline-radius: 0;
                         box-shadow: none;
                         border: none;
-                        background: rgba(255,255,255,0.06);
+                        background: rgba(255,255,255,0.16);
                     }
                     .app-item:active {
                         outline: none;
@@ -345,9 +361,24 @@ namespace Dokku {
             return false;
         }
 
+        // How well an app matches the query: 0 when there is no query, -1 for no match.
+        // Name matches beat id/command matches, and earlier-in-name beats later.
+        private static int match_score(AppInfo app, string query) {
+            if (query == "") return 0;
+            string name = app.name_lower;
+            if (name == query) return 100;
+            if (name.has_prefix(query)) return 80;
+            if (name.contains(" " + query) || name.contains("-" + query)) return 60;
+            if (name.contains(query)) return 40;
+            if (app.id_lower.has_prefix(query) || app.exec_base.has_prefix(query)) return 30;
+            if (app.id_lower.contains(query) || app.exec_base.contains(query)) return 20;
+            return -1;
+        }
+
         private void on_search_changed() {
-            string query = search_entry.text.down();
+            string query = search_entry.text.strip().down();
             filtered_apps = new List<weak AppInfo>();
+            match_scores.remove_all();
 
             foreach (var app in app_manager.get_all_apps()) {
                 if (config.is_app_hidden(app.id)) continue;
@@ -356,8 +387,10 @@ namespace Dokku {
                 // Category filter
                 if (active_category != "All" && app.display_category != active_category) continue;
 
-                if (query == "" || app.name.down().contains(query) || app.id.down().contains(query)) {
+                int score = match_score(app, query);
+                if (score >= 0) {
                     filtered_apps.append(app);
+                    match_scores.set(app.id, score);
                 }
             }
             current_page = 0;
@@ -369,12 +402,15 @@ namespace Dokku {
             // Remove all existing pages
             page_stack.foreach((w) => page_stack.remove(w));
 
-            // Sort by usage count (descending), then alphabetically for ties
+            // Best match first, then by usage count (descending), then alphabetically
             var sort_arr = new GenericArray<unowned AppInfo>();
             foreach (var app in filtered_apps) {
                 sort_arr.add(app);
             }
             sort_arr.sort_with_data((a, b) => {
+                int score_a = match_scores.contains(a.id) ? match_scores.get(a.id) : 0;
+                int score_b = match_scores.contains(b.id) ? match_scores.get(b.id) : 0;
+                if (score_a != score_b) return score_b - score_a;
                 int usage_a = usage_tracker.get_count(a.id);
                 int usage_b = usage_tracker.get_count(b.id);
                 if (usage_a != usage_b) return usage_b - usage_a;
@@ -403,9 +439,49 @@ namespace Dokku {
                     }
                 }
             }
+            // In the plain All view, each category with enough apps gets a folder holding all
+            // of them. The most-used apps also stay in the grid, so they remain one click away.
+            category_groups.remove_all();
+            var top_used = new HashTable<string, bool>(str_hash, str_equal);
+            if (active_category == "All" && query == "" && config.get_group_apps()) {
+                int taken = 0;
+                foreach (var app in filtered_apps) {   // already sorted by usage
+                    if (taken >= TOP_USED_APPS || usage_tracker.get_count(app.id) <= 0) break;
+                    top_used.set(app.id, true);
+                    taken++;
+                }
+                var by_category = new HashTable<string, GenericArray<weak AppInfo>>(str_hash, str_equal);
+                foreach (var app in filtered_apps) {
+                    // The catch-all category and the menu's top-level entries stay loose
+                    if (!app.groupable) continue;
+                    if (!by_category.contains(app.display_category)) {
+                        by_category.set(app.display_category, new GenericArray<weak AppInfo>());
+                    }
+                    by_category.get(app.display_category).add(app);
+                }
+                by_category.foreach((category, members) => {
+                    if (members.length >= GROUP_MIN_APPS) category_groups.set(category, members);
+                });
+            }
+            var placed = new HashTable<string, bool>(str_hash, str_equal);
             foreach (var app in filtered_apps) {
+                string category = app.display_category;
+                if (category_groups.contains(category) && is_in_group(category_groups, app)) {
+                    // The folder sits where its first app that isn't already in the grid would be
+                    if (top_used.contains(app.id)) {
+                        items.append("app:" + app.id);
+                    } else if (!placed.contains(category)) {
+                        items.append("group:" + category);
+                        placed.set(category, true);
+                    }
+                    continue;
+                }
                 items.append("app:" + app.id);
             }
+            // A folder whose apps are all in the grid already still needs its tile
+            category_groups.foreach((category, members) => {
+                if (!placed.contains(category)) items.append("group:" + category);
+            });
 
             // Store ordered items for Enter-key launch
             ordered_items = new List<string>();
@@ -443,6 +519,9 @@ namespace Dokku {
                         widget = create_folder_item(item.substring(7));
                     } else if (item.has_prefix("shortcut:")) {
                         widget = create_shortcut_item(item.substring(9));
+                    } else if (item.has_prefix("group:")) {
+                        string category = item.substring(6);
+                        widget = create_group_item(category, category_groups.get(category));
                     } else {
                         var app = app_manager.get_app(item.substring(4));
                         if (app != null) {
@@ -477,22 +556,32 @@ namespace Dokku {
         }
 
         private void update_page_indicator() {
-            page_indicator.foreach((w) => page_indicator.remove(w));
-
-            for (int i = 0; i < total_pages; i++) {
-                var dot = new Gtk.Button();
-                dot.set_size_request(8, 8);
-                dot.get_style_context().add_class("page-dot");
-                if (i == current_page) {
-                    dot.get_style_context().add_class("active");
+            // Rebuilding the dots mid-slide forces a layout pass, so only do it when the
+            // number of pages changed; otherwise just move the active highlight.
+            var dots = page_indicator.get_children();
+            if (dots.length() != total_pages) {
+                dots.foreach((w) => page_indicator.remove(w));
+                for (int i = 0; i < total_pages; i++) {
+                    var dot = new Gtk.Button();
+                    dot.set_size_request(8, 8);
+                    dot.get_style_context().add_class("page-dot");
+                    int page = i;
+                    dot.clicked.connect(() => {
+                        go_to_page(page);
+                    });
+                    page_indicator.pack_start(dot, false, false, 0);
                 }
-                int page = i;
-                dot.clicked.connect(() => {
-                    go_to_page(page);
-                });
-                page_indicator.pack_start(dot, false, false, 0);
+                page_indicator.show_all();
+                dots = page_indicator.get_children();
             }
-            page_indicator.show_all();
+
+            int index = 0;
+            foreach (var dot in dots) {
+                var ctx = dot.get_style_context();
+                if (index == current_page) ctx.add_class("active");
+                else ctx.remove_class("active");
+                index++;
+            }
         }
 
         private bool is_app_pinned(AppInfo app) {
@@ -536,10 +625,15 @@ namespace Dokku {
             // Right click - context menu
             btn.button_press_event.connect((event) => {
                 if (event.button == 3) {
-                    show_app_menu(app, event);
+                    show_app_menu(app, btn, event);
                     return true;
                 }
                 return false;
+            });
+            // Menu key / Shift+F10
+            btn.popup_menu.connect(() => {
+                show_app_menu(app, btn, null);
+                return true;
             });
 
             // Drag source - supports text (internal folders) + URI (dock drops)
@@ -612,8 +706,39 @@ namespace Dokku {
             return btn;
         }
 
-        private void show_app_menu(AppInfo app, Gdk.EventButton event) {
+        private void show_app_menu(AppInfo app, Gtk.Widget anchor, Gdk.EventButton? event) {
             var menu = new Gtk.Menu();
+
+            var open_item = new Gtk.MenuItem.with_label("Open");
+            open_item.activate.connect(() => {
+                usage_tracker.record_launch(app.id);
+                app.launch();
+                fade_hide();
+            });
+            menu.append(open_item);
+
+            // The app's own actions from its .desktop file (New Window, Private Window, ...)
+            DesktopAppInfo? desktop_info = null;
+            if (app.desktop_file != null && app.desktop_file != "") {
+                desktop_info = new DesktopAppInfo.from_filename(app.desktop_file);
+            }
+            if (desktop_info != null && desktop_info.list_actions().length > 0) {
+                menu.append(new Gtk.SeparatorMenuItem());
+                foreach (var action in desktop_info.list_actions()) {
+                    var action_item = new Gtk.MenuItem.with_label(desktop_info.get_action_name(action));
+                    string action_name = action;
+                    action_item.activate.connect(() => {
+                        var display = Gdk.Display.get_default();
+                        desktop_info.launch_action(action_name,
+                            display != null ? display.get_app_launch_context() : null);
+                        usage_tracker.record_launch(app.id);
+                        fade_hide();
+                    });
+                    menu.append(action_item);
+                }
+            }
+
+            menu.append(new Gtk.SeparatorMenuItem());
 
             if (!is_app_pinned(app)) {
                 var dock_item = new Gtk.MenuItem.with_label("Add to Dock");
@@ -625,13 +750,22 @@ namespace Dokku {
 
             var hide_item = new Gtk.MenuItem.with_label("Hide from Launcher");
             hide_item.activate.connect(() => {
+                // The popover is anchored to a tile that the rebuild below destroys
+                if (folder_popover != null) {
+                    folder_popover.popdown();
+                    folder_popover = null;
+                }
                 config.hide_app(app.id);
                 on_search_changed();
             });
             menu.append(hide_item);
 
             menu.show_all();
-            menu.popup_at_pointer(event);
+            if (event != null) {
+                menu.popup_at_pointer(event);
+            } else {
+                menu.popup_at_widget(anchor, Gdk.Gravity.SOUTH, Gdk.Gravity.NORTH, null);
+            }
         }
 
         private Gtk.Widget create_folder_item(string folder_id) {
@@ -896,6 +1030,139 @@ namespace Dokku {
             return btn;
         }
 
+        private static bool is_in_group(HashTable<string, GenericArray<weak AppInfo>> groups, AppInfo app) {
+            var members = groups.get(app.display_category);
+            if (members == null) return false;
+            for (int i = 0; i < members.length; i++) {
+                if (members[i] == app) return true;
+            }
+            return false;
+        }
+
+        // A folder-looking tile that holds a computed set of apps (not stored in the config)
+        private Gtk.Widget create_group_item(string title, GenericArray<weak AppInfo> apps) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+            btn.get_style_context().add_class("app-item");
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
+
+            var icon_box = new Gtk.Grid();
+            icon_box.row_spacing = 1;
+            icon_box.column_spacing = 1;
+            icon_box.halign = Gtk.Align.CENTER;
+            icon_box.valign = Gtk.Align.CENTER;
+
+            int mini_icon = icon_size / 4;
+            for (int i = 0; i < apps.length && i < 9; i++) {
+                var icon = new Gtk.Image();
+                var pixbuf = load_cached_icon(apps[i].icon, mini_icon);
+                if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+                else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.LARGE_TOOLBAR);
+                icon_box.attach(icon, i % 3, i / 3, 1, 1);
+            }
+
+            var folder_frame = new Gtk.EventBox();
+            folder_frame.get_style_context().add_class("folder-icon");
+            folder_frame.set_size_request(icon_size, icon_size);
+            folder_frame.add(icon_box);
+
+            var label = new Gtk.Label(title);
+            label.get_style_context().add_class("app-name");
+            label.max_width_chars = 12;
+            label.ellipsize = Pango.EllipsizeMode.END;
+
+            box.pack_start(folder_frame, false, false, 0);
+            box.pack_start(label, false, false, 0);
+            btn.add(box);
+            btn.set_size_request(item_size, item_size);
+
+            btn.clicked.connect(() => open_group(title, apps, btn));
+            return btn;
+        }
+
+        private void open_group(string title, GenericArray<weak AppInfo> apps, Gtk.Widget anchor) {
+            if (folder_popover != null) {
+                folder_popover.popdown();
+                folder_popover = null;
+            }
+
+            folder_popover = new Gtk.Popover(anchor);
+            folder_popover.set_position(Gtk.PositionType.TOP);
+            folder_popover.get_style_context().add_class("folder-popover");
+
+            var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
+            vbox.margin = 15;
+
+            var name_label = new Gtk.Label(title);
+            name_label.halign = Gtk.Align.CENTER;
+            name_label.get_style_context().add_class("folder-title");
+            vbox.pack_start(name_label, false, false, 0);
+
+            var grid = new Gtk.Grid();
+            grid.row_spacing = 10;
+            grid.column_spacing = 10;
+            grid.halign = Gtk.Align.CENTER;
+            for (int i = 0; i < apps.length; i++) {
+                grid.attach(create_group_app_item(apps[i]), i % 4, i / 4, 1, 1);
+            }
+
+            // A big group scrolls instead of growing past the screen
+            var scroll = new Gtk.ScrolledWindow(null, null);
+            scroll.hscrollbar_policy = Gtk.PolicyType.NEVER;
+            scroll.propagate_natural_height = true;
+            scroll.max_content_height = 480;
+            scroll.add(grid);
+            vbox.pack_start(scroll, true, true, 0);
+
+            folder_popover.add(vbox);
+            folder_popover.show_all();
+            folder_popover.closed.connect(() => {
+                folder_popover = null;
+            });
+        }
+
+        private Gtk.Widget create_group_app_item(AppInfo app) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
+
+            var icon = new Gtk.Image();
+            var pixbuf = load_cached_icon(app.icon, 48);
+            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
+            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
+
+            var label = new Gtk.Label(app.name);
+            label.max_width_chars = 12;
+            label.ellipsize = Pango.EllipsizeMode.END;
+            label.get_style_context().add_class("app-name");
+
+            box.pack_start(icon, false, false, 0);
+            box.pack_start(label, false, false, 0);
+            btn.add(box);
+
+            btn.clicked.connect(() => {
+                usage_tracker.record_launch(app.id);
+                app.launch();
+                if (folder_popover != null) folder_popover.popdown();
+                folder_popover = null;
+                fade_hide();
+            });
+            btn.button_press_event.connect((event) => {
+                if (event.button == 3) {
+                    show_app_menu(app, btn, event);
+                    return true;
+                }
+                return false;
+            });
+            btn.popup_menu.connect(() => {
+                show_app_menu(app, btn, null);
+                return true;
+            });
+            return btn;
+        }
+
         private Gtk.Widget create_shortcut_item(string shortcut_id) {
             var btn = new Gtk.Button();
             btn.relief = Gtk.ReliefStyle.NONE;
@@ -1153,7 +1420,87 @@ namespace Dokku {
             }
         }
 
+        private Gtk.Grid? page_grid(int page) {
+            return page_stack.get_child_by_name("page_%d".printf(page)) as Gtk.Grid;
+        }
+
+        // Grid cell of the focused app item on the visible page
+        private bool focused_cell(out int col, out int row) {
+            col = -1;
+            row = -1;
+            var grid = page_grid(current_page);
+            var focus = get_focus();
+            if (grid == null || focus == null) return false;
+            for (int r = 0; r < rows; r++) {
+                for (int c = 0; c < cols; c++) {
+                    if (grid.get_child_at(c, r) == focus) {
+                        col = c;
+                        row = r;
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        // Focus the item at (col, row), or the closest one before it in that row
+        private bool focus_cell(Gtk.Grid? grid, int col, int row) {
+            if (grid == null || row < 0) return false;
+            for (int c = int.min(col, cols - 1); c >= 0; c--) {
+                var item = grid.get_child_at(c, row);
+                if (item != null) {
+                    item.grab_focus();
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // Focus the nearest row at or above `row` that has an item in it
+        private void focus_cell_up_from(Gtk.Grid? grid, int col, int row) {
+            for (int r = row; r >= 0; r--) {
+                if (focus_cell(grid, col, r)) return;
+            }
+        }
+
+        private bool navigate_items(uint keyval, int col, int row) {
+            var grid = page_grid(current_page);
+            switch (keyval) {
+                case Gdk.Key.Left:
+                    if (col > 0) {
+                        focus_cell(grid, col - 1, row);
+                    } else if (current_page > 0) {
+                        go_to_page(current_page - 1);
+                        focus_cell(page_grid(current_page), cols - 1, row);
+                    }
+                    return true;
+                case Gdk.Key.Right:
+                    if (col < cols - 1 && grid.get_child_at(col + 1, row) != null) {
+                        focus_cell(grid, col + 1, row);
+                    } else if (current_page < total_pages - 1) {
+                        go_to_page(current_page + 1);
+                        focus_cell_up_from(page_grid(current_page), 0, row);
+                    }
+                    return true;
+                case Gdk.Key.Down:
+                    focus_cell(grid, col, row + 1);
+                    return true;
+                case Gdk.Key.Up:
+                    if (row > 0) {
+                        focus_cell(grid, col, row - 1);
+                    } else {
+                        search_entry.grab_focus();
+                    }
+                    return true;
+            }
+            return false;
+        }
+
         private bool on_key_press(Gdk.EventKey event) {
+            var focus = get_focus();
+            bool on_item = focus != null && focus.get_style_context().has_class("app-item");
+            bool entry_has_text = search_entry.has_focus && search_entry.text != "";
+
             if (event.keyval == Gdk.Key.Escape) {
                 if (folder_popover != null) {
                     folder_popover.popdown();
@@ -1164,7 +1511,8 @@ namespace Dokku {
                 return true;
             }
             if (event.keyval == Gdk.Key.Return || event.keyval == Gdk.Key.KP_Enter) {
-                if (search_entry.text != "" && ordered_items.length() > 0) {
+                // With an icon focused, Enter activates that icon instead
+                if (!on_item && search_entry.text != "" && ordered_items.length() > 0) {
                     string first = ordered_items.nth_data(0);
                     if (first.has_prefix("app:")) {
                         var app = app_manager.get_app(first.substring(4));
@@ -1186,15 +1534,52 @@ namespace Dokku {
                     return true;
                 }
             }
-            if (event.keyval == Gdk.Key.Left) {
+
+            if (event.keyval == Gdk.Key.Page_Up) {
                 go_to_page(current_page - 1);
                 return true;
             }
-            if (event.keyval == Gdk.Key.Right) {
+            if (event.keyval == Gdk.Key.Page_Down) {
                 go_to_page(current_page + 1);
                 return true;
             }
-            if (!search_entry.has_focus) {
+
+            if (on_item) {
+                int col, row;
+                if (focused_cell(out col, out row) && navigate_items(event.keyval, col, row)) return true;
+            } else if (search_entry.has_focus && event.keyval == Gdk.Key.Down) {
+                // From the search box, Down drops into the grid
+                var grid = page_grid(current_page);
+                if (grid != null && focus_cell(grid, 0, 0)) return true;
+            }
+
+            // Left/Right/Home/End move the text cursor while there is something to edit;
+            // otherwise they turn pages.
+            if (!entry_has_text && !on_item) {
+                switch (event.keyval) {
+                    case Gdk.Key.Left:
+                        go_to_page(current_page - 1);
+                        return true;
+                    case Gdk.Key.Right:
+                        go_to_page(current_page + 1);
+                        return true;
+                    case Gdk.Key.Home:
+                        go_to_page(0);
+                        return true;
+                    case Gdk.Key.End:
+                        go_to_page(total_pages - 1);
+                        return true;
+                }
+            }
+
+            // Typing from anywhere goes to the search box. Space stays with a focused icon
+            // (it activates it), and shortcuts like Ctrl+C are left alone.
+            bool plain = (event.state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK)) == 0;
+            // Control characters (Return, Tab, ...) also have a unicode value, so exclude them.
+            uint32 typed = Gdk.keyval_to_unicode(event.keyval);
+            bool printable = typed >= 0x20 && typed != 0x7f &&
+                             !(on_item && event.keyval == Gdk.Key.space);
+            if (!search_entry.has_focus && plain && (printable || event.keyval == Gdk.Key.BackSpace)) {
                 search_entry.grab_focus();
             }
             return false;
@@ -1211,19 +1596,19 @@ namespace Dokku {
         }
 
         private bool on_scroll(Gdk.EventScroll event) {
-            if (event.direction == Gdk.ScrollDirection.LEFT || event.direction == Gdk.ScrollDirection.UP) {
-                go_to_page(current_page - 1);
+            int64 now = GLib.get_monotonic_time();
+            bool new_gesture = now - last_scroll_event_us > SCROLL_GESTURE_GAP_US;
+            last_scroll_event_us = now;
+            if (new_gesture) {
                 scroll_accumulator_x = 0.0;
                 scroll_accumulator_y = 0.0;
-                return true;
+                scroll_gesture_consumed = false;
             }
-            if (event.direction == Gdk.ScrollDirection.RIGHT || event.direction == Gdk.ScrollDirection.DOWN) {
-                go_to_page(current_page + 1);
-                scroll_accumulator_x = 0.0;
-                scroll_accumulator_y = 0.0;
-                return true;
-            }
+
             if (event.direction == Gdk.ScrollDirection.SMOOTH) {
+                // Touchpad inertia keeps sending events after the flip; wait for a pause
+                if (scroll_gesture_consumed) return true;
+
                 scroll_accumulator_x += event.delta_x;
                 scroll_accumulator_y += event.delta_y;
 
@@ -1231,18 +1616,29 @@ namespace Dokku {
                     ? scroll_accumulator_x
                     : scroll_accumulator_y;
 
-                if (effective_delta > SCROLL_THRESHOLD) {
-                    go_to_page(current_page + 1);
+                if (effective_delta > SCROLL_THRESHOLD || effective_delta < -SCROLL_THRESHOLD) {
+                    go_to_page(current_page + (effective_delta > 0 ? 1 : -1));
                     scroll_accumulator_x = 0.0;
                     scroll_accumulator_y = 0.0;
-                } else if (effective_delta < -SCROLL_THRESHOLD) {
-                    go_to_page(current_page - 1);
-                    scroll_accumulator_x = 0.0;
-                    scroll_accumulator_y = 0.0;
+                    scroll_gesture_consumed = true;
                 }
                 return true;
             }
-            return false;
+
+            int step;
+            if (event.direction == Gdk.ScrollDirection.LEFT || event.direction == Gdk.ScrollDirection.UP) {
+                step = -1;
+            } else if (event.direction == Gdk.ScrollDirection.RIGHT || event.direction == Gdk.ScrollDirection.DOWN) {
+                step = 1;
+            } else {
+                return false;
+            }
+            // Don't restart the slide on every notch of a fast wheel spin
+            if (now >= wheel_locked_until_us) {
+                go_to_page(current_page + step);
+                wheel_locked_until_us = now + WHEEL_LOCKOUT_US;
+            }
+            return true;
         }
 
         public void toggle() {
