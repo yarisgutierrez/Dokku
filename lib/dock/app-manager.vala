@@ -7,6 +7,10 @@ namespace Dokku {
         public string desktop_file { get; set; }
         public string[] categories { get; set; }
         public string display_category { get; set; default = "Other"; }
+        // The desktop menu lists this one at the top level (Terminal, File Manager, ...)
+        public bool toplevel { get; set; default = false; }
+        // False for the catch-all category and top-level entries: the launcher never folders them
+        public bool groupable { get; set; default = false; }
 
         // Pre-cached lowercase strings for O(n) matching in find_by_window slow path
         public string id_lower { get; set; default = ""; }
@@ -122,17 +126,25 @@ namespace Dokku {
         }
 
         private void resolve_display_category() {
+            // Utility is the freedesktop catch-all and many apps list it first (Zed has
+            // "Utility;TextEditor;Development;IDE"). Take the first category that says more
+            // than that, and only fall back to Accessories when nothing else applies.
             var map = get_category_map();
+            bool generic_only = false;
             foreach (var cat in categories) {
                 string trimmed = cat.strip();
                 if (trimmed == "") continue;
                 string? mapped = map.get(trimmed);
-                if (mapped != null) {
-                    display_category = mapped;
-                    return;
+                if (mapped == null) continue;
+                if (mapped == "Accessories") {
+                    generic_only = true;
+                    continue;
                 }
+                display_category = mapped;
+                return;
             }
-            display_category = "Other";
+            display_category = generic_only ? "Accessories" : "Other";
+            groupable = display_category != "Other";
         }
 
         public AppInfo.from_desktop_file(string path) {
@@ -225,16 +237,17 @@ namespace Dokku {
         private GenericArray<FileMonitor> dir_monitors;
         private uint reload_timeout_id = 0;
         private const uint RELOAD_DELAY_MS = 2000;
-        private string[] app_dirs = {
-            "/usr/share/applications",
-            "/usr/local/share/applications"
-        };
+        private string[] app_dirs = {};
 
         private const string[] CATEGORY_ORDER = {
             "Accessories", "Audio", "Development", "Education",
             "Games", "Graphics", "Internet", "Multimedia",
             "Office", "Science", "Settings", "System", "Video", "Other"
         };
+
+        // The desktop's own menu definition; null when none is found, which falls back to
+        // the built-in category table in AppInfo
+        private MenuCategories? menu_categories = null;
 
         public signal void apps_changed();
 
@@ -244,8 +257,10 @@ namespace Dokku {
             exec_base_index = new HashTable<string, AppInfo>(str_hash, str_equal);
             category_index = new HashTable<string, GenericArray<weak AppInfo>>(str_hash, str_equal);
             dir_monitors = new GenericArray<FileMonitor>();
-            var home = Environment.get_home_dir();
-            app_dirs += Path.build_filename(home, ".local/share/applications");
+            app_dirs += Path.build_filename(Environment.get_user_data_dir(), "applications");
+            foreach (var data_dir in Environment.get_system_data_dirs()) {
+                app_dirs += Path.build_filename(data_dir, "applications");
+            }
             load_applications();
             setup_directory_monitors();
         }
@@ -292,21 +307,20 @@ namespace Dokku {
         }
 
         private void load_applications() {
-            foreach (var dir in app_dirs) {
-                try {
-                    var directory = Dir.open(dir);
-                    string? name;
-                    while ((name = directory.read_name()) != null) {
-                        if (name.has_suffix(".desktop")) {
-                            var path = Path.build_filename(dir, name);
-                            var app = new AppInfo.from_desktop_file(path);
-                            if (app.exec != "" && !app.no_display) {
-                                apps.set(app.id, app);
-                            }
-                        }
-                    }
-                } catch (Error e) {
-                    warning("Failed to scan app directory %s: %s", dir, e.message);
+            menu_categories = MenuCategories.load();
+            // GLib resolves the XDG data directories, lets a user entry override a system
+            // one, drops entries marked Hidden, and refuses to load one whose TryExec
+            // binary isn't installed, so leftover .desktop files don't show up.
+            foreach (var info in GLib.AppInfo.get_all()) {
+                var desktop_info = info as DesktopAppInfo;
+                if (desktop_info == null) continue;
+                string? path = desktop_info.get_filename();
+                if (path == null || !desktop_info.should_show()) continue;
+
+                var app = new AppInfo.from_desktop_file(path);
+                if (menu_categories != null) menu_categories.apply(app);
+                if (app.exec != "" && !app.no_display) {
+                    apps.set(app.id, app);
                 }
             }
             build_indices();
@@ -334,7 +348,8 @@ namespace Dokku {
 
         public string[] get_populated_categories() {
             string[] result = {};
-            foreach (var cat in CATEGORY_ORDER) {
+            string[] order = menu_categories != null ? menu_categories.order : CATEGORY_ORDER;
+            foreach (var cat in order) {
                 if (category_index.contains(cat) && category_index.get(cat).length > 0) {
                     result += cat;
                 }

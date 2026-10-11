@@ -28,6 +28,7 @@ libdokku_sources = files(
   'dock/dock-renderer.vala',
   'dock/window-manager.vala',
   'dock/app-manager.vala',
+  'dock/menu-categories.vala',
   'dock/config-manager.vala',
   'dock/notification-monitor.vala',
   'dock/progress-monitor.vala',
