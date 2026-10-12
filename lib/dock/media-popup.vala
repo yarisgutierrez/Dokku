@@ -30,6 +30,9 @@ namespace Dokku {
         // A click this soon after the popup opened by hover is ignored: it was most likely
         // aimed at opening the popup, which the hover just did
         private const int CLICK_GUARD_MS = 800;
+        // Clicks closer together than this count as one: a double-click, a bouncing switch or a
+        // double tap would otherwise open the popup and close it again before it is seen
+        private const int CLICK_DEBOUNCE_MS = 350;
         private const int ART_SIZE = 88;
         private const int ICON_SIZE = 20;
 
@@ -62,6 +65,7 @@ namespace Dokku {
         private bool hover_suppressed = false;
         // When the open popup was opened by hover (monotonic µs), or 0 if a click opened it
         private int64 hover_opened_at = 0;
+        private int64 last_toggle_at = 0;
         private uint seek_id = 0;
         private bool scrubbing = false;
         private bool seek_pending = false;
@@ -135,6 +139,9 @@ namespace Dokku {
 
         // A click on the widget's art or text: close the popup if it is open, else open it
         public void toggle(MediaPlugin target, int index) {
+            int64 now = GLib.get_monotonic_time();
+            if (last_toggle_at != 0 && now - last_toggle_at < CLICK_DEBOUNCE_MS * 1000) return;
+            last_toggle_at = now;
             if (popup != null && !fading_out) {
                 if (hover_opened_at != 0 &&
                     GLib.get_monotonic_time() - hover_opened_at < CLICK_GUARD_MS * 1000) return;
