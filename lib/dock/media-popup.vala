@@ -23,7 +23,7 @@ namespace Dokku {
         private bool pointer_inside = false;
         private uint dismiss_id = 0;
         private const int FADE_MS = 180;
-        private const int ART_SIZE = 104;
+        private const int ART_SIZE = 88;
         private const int ICON_SIZE = 20;
 
         // The track the open popup shows, and the widgets that follow it
@@ -166,8 +166,8 @@ namespace Dokku {
             try {
                 accent_css.load_from_data(
                     ".media-artist { color: %s; } ".printf(accent) +
-                    "button.media-play { background: %s; color: %s; border-radius: 18px; ".printf(accent, on_accent) +
-                    "min-width: 60px; min-height: 38px; padding: 0; } " +
+                    "button.media-play { background: %s; color: %s; border-radius: 15px; ".printf(accent, on_accent) +
+                    "min-width: 48px; min-height: 30px; padding: 0; } " +
                     "button.media-play:hover { background: %s; } ".printf(hex(ar * 0.85, ag * 0.85, ab * 0.85)) +
                     "scale highlight, scale trough highlight { background-image: none; background-color: %s; border-color: %s; } ".printf(accent, accent) +
                     "scale slider { background-color: %s; border-color: %s; } ".printf(accent, accent));
@@ -304,18 +304,18 @@ namespace Dokku {
             try {
                 css_provider.load_from_data(
                     "button { color: %s; } button:hover { background: %s; } ".printf(fg, hover) +
-                    ".media-title { color: %s; font-size: 15px; } .media-artist { color: %s; } ".printf(fg, dim) +
+                    ".media-title { color: %s; font-size: 14px; } .media-artist { color: %s; } ".printf(fg, dim) +
                     ".media-album, .media-time { color: %s; } .media-time { font-size: 11px; } ".printf(dim) +
-                    "scale trough { min-height: 4px; background-image: none; background-color: %s; } ".printf(track) +
-                    "scale slider { min-width: 12px; min-height: 12px; background-image: none; }");
+                    "scale trough { min-height: 3px; background-image: none; background-color: %s; } ".printf(track) +
+                    "scale slider { min-width: 10px; min-height: 10px; background-image: none; }");
             } catch (Error e) {}
             accent_css = new Gtk.CssProvider();
 
-            var outer = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
-            outer.margin = 16;
+            var outer = new Gtk.Box(Gtk.Orientation.VERTICAL, 6);
+            outer.margin = 12;
 
             // Art on the left; text on the right with the player's logo in the corner
-            var top = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 16);
+            var top = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 14);
             art_image = new Gtk.Image();
             art_image.set_size_request(ART_SIZE, ART_SIZE);
             art_image.valign = Gtk.Align.START;
@@ -377,14 +377,14 @@ namespace Dokku {
             seek.button_release_event.connect_after(() => { scrubbing = false; commit_seek(); return false; });
 
             // Transport controls: the play button is the highlighted one
-            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 18);
+            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 16);
             btn_box.halign = Gtk.Align.CENTER;
-            btn_box.pack_start(make_button("media-skip-backward-symbolic", 22, css_provider, () => target.previous()), false, false, 0);
-            play_btn = make_button("media-playback-start-symbolic", 24, css_provider, () => target.activate());
+            btn_box.pack_start(make_button("media-skip-backward-symbolic", 18, css_provider, () => target.previous()), false, false, 0);
+            play_btn = make_button("media-playback-start-symbolic", 20, css_provider, () => target.activate());
             play_btn.get_style_context().add_class("media-play");
             play_btn.get_style_context().add_provider(accent_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             btn_box.pack_start(play_btn, false, false, 0);
-            btn_box.pack_start(make_button("media-skip-forward-symbolic", 22, css_provider, () => target.next()), false, false, 0);
+            btn_box.pack_start(make_button("media-skip-forward-symbolic", 18, css_provider, () => target.next()), false, false, 0);
             outer.pack_start(btn_box, false, false, 0);
 
             // Themed popup background
