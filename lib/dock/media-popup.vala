@@ -43,6 +43,8 @@ namespace Dokku {
         // one-second timer runs while the popup is open and the track is playing
         private uint tick_id = 0;
         private uint request_id = 0;
+        // Set when a click closed the popup: hover must not reopen it until the pointer leaves
+        private bool hover_suppressed = false;
         private uint seek_id = 0;
         private bool scrubbing = false;
         private bool seek_pending = false;
@@ -91,6 +93,7 @@ namespace Dokku {
 
         // Open after the pointer has rested on the widget for a moment
         public void request(MediaPlugin target, int index) {
+            if (hover_suppressed) return;
             if (popup != null && !fading_out) { cancel_dismiss(); return; }
             if (request_id != 0) return;
             request_id = Timeout.add(300, () => {
@@ -100,8 +103,20 @@ namespace Dokku {
             });
         }
 
+        // Called when the pointer is off the widget: hover may open the popup again
         public void cancel_request() {
             if (request_id != 0) { Source.remove(request_id); request_id = 0; }
+            hover_suppressed = false;
+        }
+
+        // A click on the widget's art or text: close the popup if it is open, else open it
+        public void toggle(MediaPlugin target, int index) {
+            if (popup != null && !fading_out) {
+                hover_suppressed = true;
+                dismiss();
+            } else {
+                open(target, index);
+            }
         }
 
         private void destroy_popup() {

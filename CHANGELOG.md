@@ -11,7 +11,8 @@ All notable changes to Dokku are listed here. The format follows
   its art or text, opens a popup with the album art, song, artist, album, elapsed and total
   time, a seek bar you can click or drag, and previous, play/pause and next. It follows the
   player live and works on horizontal and vertical docks. The play/pause and skip buttons on
-  the widget still work; clicking elsewhere on it no longer toggles playback. The bar is
+  the widget still work; clicking its art or text opens the popup, or closes it if it is already
+  open (it stays closed until the pointer leaves), and no longer toggles playback. The bar is
   left out for streams with no length or players that can't seek.
 - **Window tracking on Wayland.** Running-app indicators, the window list for apps with
   several windows, click to focus, Hide and Quit, clearing a notification badge when the app

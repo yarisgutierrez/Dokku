@@ -1683,7 +1683,7 @@ namespace Dokku {
             if (item.is_media_widget && item.plugin is MediaPlugin) {
                 var mp = item.plugin as MediaPlugin;
                 if (is_vertical) {
-                    media_popup.open(mp, index);
+                    media_popup.toggle(mp, index);
                     return;
                 }
                 double item_start, item_w;
@@ -1699,7 +1699,7 @@ namespace Dokku {
                 } else if (click_x >= pause_x && click_x <= pause_x + ctrl_sz) {
                     mp.activate();
                 } else {
-                    media_popup.open(mp, index);  // the art or the text
+                    media_popup.toggle(mp, index);  // the art or the text
                 }
                 return;
             }
