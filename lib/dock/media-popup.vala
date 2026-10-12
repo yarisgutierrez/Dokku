@@ -24,6 +24,12 @@ namespace Dokku {
         private bool pointer_inside = false;
         private uint dismiss_id = 0;
         private const int FADE_MS = 180;
+        // How long the pointer rests on the widget before the popup opens. Long enough that
+        // someone who means to click usually does so first.
+        private const int HOVER_DELAY_MS = 600;
+        // A click this soon after the popup opened by hover is ignored: it was most likely
+        // aimed at opening the popup, which the hover just did
+        private const int CLICK_GUARD_MS = 800;
         private const int ART_SIZE = 88;
         private const int ICON_SIZE = 20;
 
@@ -54,6 +60,8 @@ namespace Dokku {
         private uint request_id = 0;
         // Set when a click closed the popup: hover must not reopen it until the pointer leaves
         private bool hover_suppressed = false;
+        // When the open popup was opened by hover (monotonic µs), or 0 if a click opened it
+        private int64 hover_opened_at = 0;
         private uint seek_id = 0;
         private bool scrubbing = false;
         private bool seek_pending = false;
@@ -110,9 +118,11 @@ namespace Dokku {
             if (hover_suppressed) return;
             if (popup != null && !fading_out) { cancel_dismiss(); return; }
             if (request_id != 0) return;
-            request_id = Timeout.add(300, () => {
+            request_id = Timeout.add(HOVER_DELAY_MS, () => {
                 request_id = 0;
+                bool was_open = popup != null && !fading_out;
                 open(target, index);
+                if (!was_open) hover_opened_at = GLib.get_monotonic_time();
                 return false;
             });
         }
@@ -126,15 +136,19 @@ namespace Dokku {
         // A click on the widget's art or text: close the popup if it is open, else open it
         public void toggle(MediaPlugin target, int index) {
             if (popup != null && !fading_out) {
+                if (hover_opened_at != 0 &&
+                    GLib.get_monotonic_time() - hover_opened_at < CLICK_GUARD_MS * 1000) return;
                 hover_suppressed = true;
                 dismiss();
             } else {
                 open(target, index);
+                hover_opened_at = 0;
             }
         }
 
         private void destroy_popup() {
             teardown();
+            hover_opened_at = 0;
             fade_tick = 0;   // the tick dies with the window
             fading_out = false;
             if (popup != null) { popup.destroy(); popup = null; }

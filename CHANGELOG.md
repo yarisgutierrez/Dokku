@@ -7,7 +7,7 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
-- **Now-playing popup with a seek bar.** Resting the pointer on the media widget, or clicking
+- **Now-playing popup with a seek bar.** Resting the pointer on the media widget for 0.6 s, or clicking
   its art or text, opens a card with the album art, song, artist, album, the player's logo,
   elapsed and total time, a seek bar you can click or drag, and previous, play/pause and next.
   The card is tinted with the album art's colour, which also colours the seek bar and the
