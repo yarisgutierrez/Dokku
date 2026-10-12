@@ -8,8 +8,10 @@ All notable changes to Dokku are listed here. The format follows
 
 ### Added
 - **Now-playing popup with a seek bar.** Resting the pointer on the media widget, or clicking
-  its art or text, opens a popup with the album art, song, artist, album, elapsed and total
-  time, a seek bar you can click or drag, and previous, play/pause and next. It follows the
+  its art or text, opens a card with the album art, song, artist, album, the player's logo,
+  elapsed and total time, a seek bar you can click or drag, and previous, play/pause and next.
+  The card is tinted with the album art's colour, which also colours the seek bar and the
+  play button. It follows the
   player live and works on horizontal and vertical docks. The play/pause and skip buttons on
   the widget still work; clicking its art or text opens the popup, or closes it if it is already
   open (it stays closed until the pointer leaves), and no longer toggles playback. The bar is

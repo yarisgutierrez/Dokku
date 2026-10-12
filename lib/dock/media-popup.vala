@@ -23,7 +23,8 @@ namespace Dokku {
         private bool pointer_inside = false;
         private uint dismiss_id = 0;
         private const int FADE_MS = 180;
-        private const int ART_SIZE = 96;
+        private const int ART_SIZE = 104;
+        private const int ICON_SIZE = 20;
 
         // The track the open popup shows, and the widgets that follow it
         private MediaPlugin? mp = null;
@@ -37,6 +38,13 @@ namespace Dokku {
         private Gtk.Label pos_label;
         private Gtk.Label len_label;
         private Gtk.Button play_btn;
+        private Gtk.Image player_icon;
+        private Gtk.CssProvider accent_css;
+        private bool popup_light = false;
+        private bool has_tint = false;
+        private double tint_r = 0;
+        private double tint_g = 0;
+        private double tint_b = 0;
         private int64 shown_length_us = -1;
 
         // Position polling and seeking: the player only reports where it is when asked, so a
@@ -142,6 +150,74 @@ namespace Dokku {
             return "%d:%02d".printf((int)(total / 60), (int)(total % 60));
         }
 
+        // The album art's average colour tints the card and picks the accent
+        private void update_colors(Gdk.Pixbuf? art) {
+            has_tint = false;
+            double ar = popup_light ? 0.1 : 0.95, ag = ar, ab = ar;   // no art: a neutral accent
+            if (art != null) {
+                var one_pixel = art.scale_simple(1, 1, Gdk.InterpType.BILINEAR);   // keep it alive while reading
+                unowned uint8[] px = one_pixel.get_pixels();
+                tint_r = px[0] / 255.0; tint_g = px[1] / 255.0; tint_b = px[2] / 255.0;
+                has_tint = true;
+                accent_from(tint_r, tint_g, tint_b, popup_light, out ar, out ag, out ab);
+            }
+            string accent = hex(ar, ag, ab);
+            string on_accent = popup_light ? "#ffffff" : "#111111";
+            try {
+                accent_css.load_from_data(
+                    ".media-artist { color: %s; } ".printf(accent) +
+                    "button.media-play { background: %s; color: %s; border-radius: 18px; ".printf(accent, on_accent) +
+                    "min-width: 60px; min-height: 38px; padding: 0; } " +
+                    "button.media-play:hover { background: %s; } ".printf(hex(ar * 0.85, ag * 0.85, ab * 0.85)) +
+                    "scale highlight, scale trough highlight { background-image: none; background-color: %s; border-color: %s; } ".printf(accent, accent) +
+                    "scale slider { background-color: %s; border-color: %s; } ".printf(accent, accent));
+            } catch (Error e) {}
+            popup.queue_draw();
+        }
+
+        private static string hex(double r, double g, double b) {
+            return "#%02x%02x%02x".printf((int)(r.clamp(0, 1) * 255), (int)(g.clamp(0, 1) * 255), (int)(b.clamp(0, 1) * 255));
+        }
+
+        // Keep the art's hue, but fix the lightness so the accent reads on the card
+        private static void accent_from(double r, double g, double b, bool light,
+                                        out double ar, out double ag, out double ab) {
+            double hi = double.max(r, double.max(g, b)), lo = double.min(r, double.min(g, b));
+            double h = 0, sat = 0, d = hi - lo, l = (hi + lo) / 2;
+            if (d > 0.0001) {
+                sat = d / (1 - (2 * l - 1).abs());
+                if (hi == r) h = ((g - b) / d) % 6;
+                else if (hi == g) h = (b - r) / d + 2;
+                else h = (r - g) / d + 4;
+                h *= 60; if (h < 0) h += 360;
+            }
+            if (sat > 0.1) sat = double.max(sat, 0.5);
+            double lum = light ? 0.38 : 0.74;
+            double c = (1 - (2 * lum - 1).abs()) * sat;
+            double x = c * (1 - ((h / 60) % 2 - 1).abs());
+            double m = lum - c / 2;
+            double rr = 0, gg = 0, bb = 0;
+            if (h < 60) { rr = c; gg = x; }
+            else if (h < 120) { rr = x; gg = c; }
+            else if (h < 180) { gg = c; bb = x; }
+            else if (h < 240) { gg = x; bb = c; }
+            else if (h < 300) { rr = x; bb = c; }
+            else { rr = c; bb = x; }
+            ar = rr + m; ag = gg + m; ab = bb + m;
+        }
+
+        // The art with rounded corners, for the card
+        private static Cairo.Surface rounded_art(Gdk.Pixbuf art, double radius) {
+            int w = art.get_width(), h = art.get_height();
+            var surface = new Cairo.ImageSurface(Cairo.Format.ARGB32, w, h);
+            var cr = new Cairo.Context(surface);
+            DockRenderer.draw_rounded_rect(cr, 0, 0, w, h, radius);
+            cr.clip();
+            Gdk.cairo_set_source_pixbuf(cr, art, 0, 0);
+            cr.paint();
+            return surface;
+        }
+
         // Bring every label, the art, the play icon and the seek bar up to date
         private void refresh() {
             if (popup == null || mp == null) return;
@@ -155,8 +231,18 @@ namespace Dokku {
             album_label.visible = mp.track_album != "";
 
             var art = mp.get_art(ART_SIZE);
-            if (art != null) art_image.set_from_pixbuf(art);
+            if (art != null) art_image.set_from_surface(rounded_art(art, 12));
             else art_image.set_from_icon_name("audio-x-generic-symbolic", Gtk.IconSize.DIALOG);
+            update_colors(art);
+
+            // The player's logo, flattened to grey so it reads as one colour
+            var logo = mp.player_icon_name != "" ? IconLoader.load(mp.player_icon_name, ICON_SIZE) : null;
+            if (logo != null) {
+                var grey = logo.copy();
+                logo.saturate_and_pixelate(grey, 0, false);
+                player_icon.set_from_pixbuf(grey);
+            }
+            player_icon.visible = logo != null;
 
             ((Gtk.Image) play_btn.image).set_from_icon_name(
                 mp.is_playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic",
@@ -208,54 +294,73 @@ namespace Dokku {
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.POPUP_MENU, host.popup_parent());
 
-            bool popup_light = host.popup_is_light();
+            popup_light = host.popup_is_light();
             string fg = popup_light ? "#1a1a1a" : "#ffffff";
             string dim = popup_light ? "#4d4d4d" : "#b3b3b3";
-            string hover = popup_light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.1)";
+            string hover = popup_light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.12)";
+            string track = popup_light ? "rgba(0,0,0,0.18)" : "rgba(255,255,255,0.22)";
 
             var css_provider = new Gtk.CssProvider();
             try {
                 css_provider.load_from_data(
                     "button { color: %s; } button:hover { background: %s; } ".printf(fg, hover) +
-                    ".media-title { color: %s; } .media-artist { color: %s; } ".printf(fg, dim) +
-                    ".media-album, .media-time { color: %s; } .media-time { font-size: 11px; }".printf(dim));
+                    ".media-title { color: %s; font-size: 15px; } .media-artist { color: %s; } ".printf(fg, dim) +
+                    ".media-album, .media-time { color: %s; } .media-time { font-size: 11px; } ".printf(dim) +
+                    "scale trough { min-height: 4px; background-image: none; background-color: %s; } ".printf(track) +
+                    "scale slider { min-width: 12px; min-height: 12px; background-image: none; }");
             } catch (Error e) {}
+            accent_css = new Gtk.CssProvider();
 
-            var hbox = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12);
-            hbox.margin = 12;
+            var outer = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
+            outer.margin = 16;
 
+            // Art on the left; text on the right with the player's logo in the corner
+            var top = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 16);
             art_image = new Gtk.Image();
             art_image.set_size_request(ART_SIZE, ART_SIZE);
             art_image.valign = Gtk.Align.START;
-            hbox.pack_start(art_image, false, false, 0);
+            top.pack_start(art_image, false, false, 0);
 
             var col = new Gtk.Box(Gtk.Orientation.VERTICAL, 3);
             col.valign = Gtk.Align.CENTER;
-
             title_label = make_label("media-title", css_provider);
             artist_label = make_label("media-artist", css_provider);
             album_label = make_label("media-album", css_provider);
+            artist_label.get_style_context().add_provider(accent_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             col.pack_start(title_label, false, false, 0);
             col.pack_start(artist_label, false, false, 0);
             col.pack_start(album_label, false, false, 0);
 
-            // Seek bar: elapsed time on the left, track length on the right
-            seek_row = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            var text_row = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
+            player_icon = new Gtk.Image();
+            player_icon.no_show_all = true;
+            player_icon.valign = Gtk.Align.START;
+            ((Gtk.Widget) player_icon).opacity = 0.8;
+            text_row.pack_start(col, true, true, 0);
+            text_row.pack_start(player_icon, false, false, 0);
+            top.pack_start(text_row, true, true, 0);
+            outer.pack_start(top, false, false, 0);
+
+            // Seek bar across the card: elapsed time on the left, track length on the right
+            seek_row = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 10);
             seek_row.no_show_all = true;
-            seek_row.margin_top = 6;
             pos_label = make_label("media-time", css_provider);
             len_label = make_label("media-time", css_provider);
-            seek = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1);
-            seek.draw_value = false;
-            seek.set_size_request(180, -1);
-            seek.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+            pos_label.width_chars = 5;
+            len_label.width_chars = 5;
+            len_label.xalign = 1;
             pos_label.show();
             len_label.show();
+            seek = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1);
+            seek.draw_value = false;
+            seek.set_size_request(240, -1);
+            seek.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+            seek.get_style_context().add_provider(accent_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             seek.show();
             seek_row.pack_start(pos_label, false, false, 0);
             seek_row.pack_start(seek, true, true, 0);
             seek_row.pack_start(len_label, false, false, 0);
-            col.pack_start(seek_row, false, false, 0);
+            outer.pack_start(seek_row, false, false, 0);
 
             seek.change_value.connect((scroll, value) => {
                 pending_us = (int64) (value.clamp(0, seek.adjustment.upper) * 1000000);
@@ -271,27 +376,36 @@ namespace Dokku {
             seek.button_press_event.connect(() => { scrubbing = true; return false; });
             seek.button_release_event.connect_after(() => { scrubbing = false; commit_seek(); return false; });
 
-            // Transport controls
-            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 4);
+            // Transport controls: the play button is the highlighted one
+            var btn_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 18);
             btn_box.halign = Gtk.Align.CENTER;
-            btn_box.margin_top = 4;
-            btn_box.pack_start(make_button("media-skip-backward-symbolic", css_provider, () => target.previous()), false, false, 0);
-            play_btn = make_button("media-playback-start-symbolic", css_provider, () => target.activate());
+            btn_box.pack_start(make_button("media-skip-backward-symbolic", 22, css_provider, () => target.previous()), false, false, 0);
+            play_btn = make_button("media-playback-start-symbolic", 24, css_provider, () => target.activate());
+            play_btn.get_style_context().add_class("media-play");
+            play_btn.get_style_context().add_provider(accent_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             btn_box.pack_start(play_btn, false, false, 0);
-            btn_box.pack_start(make_button("media-skip-forward-symbolic", css_provider, () => target.next()), false, false, 0);
-            col.pack_start(btn_box, false, false, 0);
-
-            hbox.pack_start(col, true, true, 0);
+            btn_box.pack_start(make_button("media-skip-forward-symbolic", 22, css_provider, () => target.next()), false, false, 0);
+            outer.pack_start(btn_box, false, false, 0);
 
             // Themed popup background
             var theme_ref = host.popup_theme();
             popup.draw.connect((cr) => {
-                PopupHelper.draw_background(cr, popup, theme_ref, 10);
+                PopupHelper.draw_background(cr, popup, theme_ref, 14);
+                if (has_tint) {
+                    // A wash of the art's colour, strongest behind the art and fading across the card
+                    int w = popup.get_allocated_width(), h = popup.get_allocated_height();
+                    var wash = new Cairo.Pattern.linear(0, 0, w, h);
+                    wash.add_color_stop_rgba(0, tint_r, tint_g, tint_b, 0.55);
+                    wash.add_color_stop_rgba(1, tint_r, tint_g, tint_b, 0.15);
+                    DockRenderer.draw_rounded_rect(cr, 1, 1, w - 2, h - 2, 13);
+                    cr.set_source(wash);
+                    cr.fill();
+                }
                 return false;
             });
 
-            popup.add(hbox);
-            hbox.show_all();
+            popup.add(outer);
+            outer.show_all();
             seek_row.visible = false;
             refresh();
 
@@ -351,8 +465,11 @@ namespace Dokku {
 
         private delegate void ButtonAction();
 
-        private Gtk.Button make_button(string icon, Gtk.CssProvider css_provider, ButtonAction action) {
-            var button = new Gtk.Button.from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR);
+        private Gtk.Button make_button(string icon, int pixel_size, Gtk.CssProvider css_provider, ButtonAction action) {
+            var button = new Gtk.Button();
+            var image = new Gtk.Image.from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR);
+            image.pixel_size = pixel_size;
+            button.image = image;
             button.relief = Gtk.ReliefStyle.NONE;
             button.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             button.clicked.connect(() => action());

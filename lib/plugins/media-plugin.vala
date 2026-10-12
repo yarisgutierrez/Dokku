@@ -22,6 +22,8 @@ namespace Dokku {
         public bool is_playing { get { return _playing; } }
         public bool has_media { get { return _has_media; } }
         public string player_name { get; private set; default = ""; }
+        // Theme icon name of the player's app, found through its MPRIS DesktopEntry
+        public string player_icon_name { get; private set; default = ""; }
 
         public signal void changed();
 
@@ -180,6 +182,7 @@ namespace Dokku {
             player_proxy = null;
             current_bus_name = null;
             player_name = "";
+            player_icon_name = "";
             track_title = "";
             track_artist = "";
             track_album = "";
@@ -221,6 +224,7 @@ namespace Dokku {
                 }
 
                 player_proxy.g_properties_changed.connect(on_properties_changed);
+                load_player_icon.begin(bus_name);
 
                 // Read initial state
                 update_metadata();
@@ -233,6 +237,28 @@ namespace Dokku {
             } catch (Error e) {
                 warning("MediaPlugin: Failed to connect to %s: %s", bus_name, e.message);
             }
+        }
+
+        // The root MPRIS interface names the player's .desktop file; its Icon is the player's logo
+        private async void load_player_icon(string bus_name) {
+            string entry = player_name.down();
+            try {
+                var reply = yield player_proxy.get_connection().call(
+                    bus_name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "Get",
+                    new Variant("(ss)", "org.mpris.MediaPlayer2", "DesktopEntry"),
+                    new VariantType("(v)"), DBusCallFlags.NONE, 1000, null);
+                Variant boxed;
+                reply.get("(v)", out boxed);
+                if (boxed.get_string() != "") entry = boxed.get_string();
+            } catch (Error e) {
+                // The property is optional; fall back to the player's name
+            }
+            string icon = entry;
+            var info = new DesktopAppInfo(entry + ".desktop");
+            if (info != null && info.get_string("Icon") != null) icon = info.get_string("Icon");
+            if (bus_name != current_bus_name) return;   // the player changed while we asked
+            player_icon_name = icon;
+            changed();
         }
 
         private void refresh_has_media() {
