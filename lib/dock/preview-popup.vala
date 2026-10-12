@@ -131,7 +131,7 @@ namespace Dokku {
                 var icon = IconLoader.image(item.icon_name, Gtk.IconSize.MENU);
                 row.pack_start(icon, false, false, 0);
 
-                var label = new Gtk.Label(window.get_name());
+                var label = new Gtk.Label(window.title);
                 label.halign = Gtk.Align.START;
                 label.ellipsize = Pango.EllipsizeMode.END;
                 label.max_width_chars = 30;
@@ -141,7 +141,7 @@ namespace Dokku {
                 var close_btn = new Gtk.Button.from_icon_name("window-close-symbolic", Gtk.IconSize.MENU);
                 close_btn.relief = Gtk.ReliefStyle.NONE;
                 close_btn.clicked.connect(() => {
-                    window.close(Gtk.get_current_event_time());
+                    window.close();
                     dismiss();
                 });
                 row.pack_end(close_btn, false, false, 0);

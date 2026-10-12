@@ -22,14 +22,14 @@ namespace Dokku {
         public string[] folder_apps;
         public double dock_width_factor { get; set; default = 1.0; }
         public Plugin? plugin { get; set; default = null; }
-        public List<weak Wnck.Window> windows;
+        public List<weak TrackedWindow> windows;
 
         public DockItem(string id, string name, string icon_name) {
             this.id = id;
             this.name = name;
             this.icon_name = icon_name;
             this.folder_apps = {};
-            this.windows = new List<weak Wnck.Window>();
+            this.windows = new List<weak TrackedWindow>();
         }
 
         public DockItem.from_plugin(Plugin plugin) {
@@ -41,7 +41,7 @@ namespace Dokku {
             this.plugin = plugin;
             this.pinned = true;
             this.folder_apps = {};
-            this.windows = new List<weak Wnck.Window>();
+            this.windows = new List<weak TrackedWindow>();
 
             if (plugin is ScriptPlugin) {
                 var sp = plugin as ScriptPlugin;

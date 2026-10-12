@@ -669,39 +669,31 @@ namespace Dokku {
 
             foreach (var window in wm.get_windows()) {
                 // Skip non-application windows (desktop, docks, panels, menus)
-                var wtype = window.get_window_type();
-                if (wtype != Wnck.WindowType.NORMAL &&
-                    wtype != Wnck.WindowType.DIALOG &&
-                    wtype != Wnck.WindowType.UTILITY) continue;
+                if (!window.is_application_window) continue;
 
                 // Skip minimized windows — not visible on screen
-                if (window.is_minimized()) continue;
+                if (window.is_minimized) continue;
 
                 // Skip Dokku's own windows
-                string? cg = window.get_class_group_name();
-                if (cg != null && cg.down() == "org.dokku.app") continue;
+                if (window.is_dokku_window()) continue;
 
                 // Check if window is on the same monitor
-                int wx, wy, ww, wh;
-                window.get_geometry(out wx, out wy, out ww, out wh);
-                int wcx = wx + ww / 2;
-                int wcy = wy + wh / 2;
-                if (wcx < mon_geo.x || wcx >= mon_geo.x + mon_geo.width ||
-                    wcy < mon_geo.y || wcy >= mon_geo.y + mon_geo.height) {
-                    continue;
-                }
+                if (!window.is_on_monitor(mon_geo)) continue;
 
-                // Maximized window on this monitor → dodge
-                if (window.is_maximized()) {
+                // Maximized or fullscreen window on this monitor → dodge. This is all
+                // Wayland can tell us: it doesn't report where a window is.
+                if (window.is_maximized || window.is_fullscreen) {
                     set_dodge_hiding(true);
                     return;
                 }
 
                 // Check rectangle intersection with dock
-                if (wx < dock_rect.x + dock_rect.width &&
-                    wx + ww > dock_rect.x &&
-                    wy < dock_rect.y + dock_rect.height &&
-                    wy + wh > dock_rect.y) {
+                Gdk.Rectangle wrect;
+                if (window.get_geometry(out wrect) &&
+                    wrect.x < dock_rect.x + dock_rect.width &&
+                    wrect.x + wrect.width > dock_rect.x &&
+                    wrect.y < dock_rect.y + dock_rect.height &&
+                    wrect.y + wrect.height > dock_rect.y) {
                     set_dodge_hiding(true);
                     return;
                 }
@@ -751,7 +743,7 @@ namespace Dokku {
                 }
                 if (!item.is_plugin && !item.is_launcher) {
                     item.running = false;
-                    item.windows = new List<weak Wnck.Window>();
+                    item.windows = new List<weak TrackedWindow>();
                 }
             }
 
@@ -1739,7 +1731,7 @@ namespace Dokku {
         private void show_window_list(DockItem item) {
             var menu = new Gtk.Menu();
             foreach (var window in item.windows) {
-                var mi = new Gtk.MenuItem.with_label(window.get_name());
+                var mi = new Gtk.MenuItem.with_label(window.title);
                 mi.activate.connect(() => wm.activate_window(window));
                 menu.append(mi);
             }
@@ -1823,20 +1815,23 @@ namespace Dokku {
             if (item.running && item.windows.length() > 0) {
                 context_menu.append(new Gtk.SeparatorMenuItem());
                 var cl = new Gtk.MenuItem.with_label("Close Window");
-                cl.activate.connect(() => item.windows.nth_data(0).close(Gtk.get_current_event_time()));
+                cl.activate.connect(() => item.windows.nth_data(0).close());
                 context_menu.append(cl);
                 
-                var force_close = new Gtk.MenuItem.with_label("Force Close");
-                force_close.activate.connect(() => {
-                    var window = item.windows.nth_data(0);
-                    if (window != null) {
-                        int pid = window.get_pid();
-                        if (pid > 0) {
-                            Posix.kill(pid, Posix.Signal.KILL);
+                // Wayland doesn't tell us another window's PID, so there is nothing to kill
+                if (item.windows.nth_data(0).get_pid() > 0) {
+                    var force_close = new Gtk.MenuItem.with_label("Force Close");
+                    force_close.activate.connect(() => {
+                        var window = item.windows.nth_data(0);
+                        if (window != null) {
+                            int pid = window.get_pid();
+                            if (pid > 0) {
+                                Posix.kill(pid, Posix.Signal.KILL);
+                            }
                         }
-                    }
-                });
-                context_menu.append(force_close);
+                    });
+                    context_menu.append(force_close);
+                }
             }
 
             if (!item.is_launcher) {
@@ -1975,7 +1970,7 @@ namespace Dokku {
 
         // --- Bounce animation ---
 
-        private void on_attention_requested(Wnck.Window window) {
+        private void on_attention_requested(TrackedWindow window) {
             var app = app_manager.find_by_window(window);
             if (app == null) return;
             trigger_bounce(app.id);

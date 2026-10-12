@@ -373,7 +373,9 @@ namespace Dokku {
 
             // Dodge windows
             vis_grid.attach(make_setting_label("Dodge windows", subtitle_for(Feature.DODGE_WINDOWS,
-                "Hide when a window overlaps the dock")), 0, row, 1, 1);
+                Capabilities.current.session == SessionType.WAYLAND
+                    ? "Hide when a window is maximized or fullscreen on this screen"
+                    : "Hide when a window overlaps the dock")), 0, row, 1, 1);
             var dodge_switch = new Gtk.Switch();
             bool dodge_ok = Capabilities.current.supports(Feature.DODGE_WINDOWS);
             dodge_switch.active = dodge_ok && config.get_dodge_windows();

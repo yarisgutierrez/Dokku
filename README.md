@@ -27,7 +27,7 @@ Dependencies (Debian/Ubuntu package names):
 
 ```sh
 sudo apt install valac meson ninja-build libgtk-3-dev libwnck-3-dev \
-    libgtk-layer-shell-dev libkeybinder-3.0-dev libx11-dev
+    libgtk-layer-shell-dev libkeybinder-3.0-dev libx11-dev libwayland-dev libwayland-bin
 # optional: libatspi2.0-dev
 ```
 
@@ -123,24 +123,31 @@ window shows why next to each one.
 |---------|-----|---------|
 | Dock, magnification, folders, drag and drop, themes | yes | yes (layer-shell) |
 | Launcher, Settings | yes | yes |
-| Media widget, notification badges (both use D-Bus) | yes | should work, untested |
-| Running-app indicators, window previews, attention bounce | yes | not yet |
-| Dodge windows, Show Desktop button | yes | not yet |
+| Media widget, notification badges (both use D-Bus) | yes | yes (undergoing testing) |
+| Running-app indicators, window list, focus and close | yes | yes, if the compositor has `wlr-foreign-toplevel-management` (undergoing testing) |
+| Show Desktop button | yes | yes, if the compositor lets clients minimize windows (labwc does; sway does not) (undergoing testing) |
+| Dodge windows | when a window overlaps the dock | when a window is maximized or fullscreen on the dock's screen (undergoing testing) |
+| Attention bounce, Force Close | yes | no: Wayland tells clients neither urgency nor other windows' PIDs |
 | Global hotkeys | yes | no: bind a key in your compositor to `dokku --launcher` |
 | Frosted glass | yes (picom) | not yet |
 
-Window tracking on Wayland would need the `zwlr_foreign_toplevel_manager_v1`
-protocol, which labwc and sway provide. It isn't implemented yet.
+On Wayland, windows are listed through the `wlr-foreign-toplevel-management` protocol,
+which sway, labwc, Wayfire and Hyprland provide. Dokku asks for it on a connection of its
+own; where the compositor lacks it, the features above are turned off and Settings says
+why. Dodge can only react to maximized and fullscreen windows there, because the
+protocol does not say where a window is.
 
-**Both sessions are supported.** The dock, its popups and tooltips, folders, drag and
-drop, themes, the launcher and Settings work on each. Tested on X11 under XFCE (xfwm4)
-and on Wayland under sway and labwc, which is XFCE's Wayland compositor. Multi-monitor
-and vertical docks have had less testing on Wayland than on X11.
+**X11 is the well-tested session; Wayland support is undergoing testing.** The dock, its
+popups and tooltips, folders, drag and drop, themes, the launcher and Settings work on
+both. Wayland has been checked in nested sway and labwc (labwc is XFCE's Wayland
+compositor): the media widget, notification badges, vertical and right-hand docks,
+several monitors (including plugging one in and out) and window tracking. Testing on
+real hardware and in a full XFCE Wayland session is still under way, so expect rough
+edges there and please report them.
 
 On Wayland the compositor must support the `wlr-layer-shell` protocol. sway, labwc,
 Wayfire, Hyprland and KDE Plasma do. GNOME's Mutter does not, so Dokku can't place
-its dock there. The features marked "not yet" in the table need a window tracker
-that isn't written, and are turned off on Wayland.
+its dock there.
 
 ## Usage
 

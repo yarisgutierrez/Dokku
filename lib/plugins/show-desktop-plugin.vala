@@ -9,10 +9,9 @@ namespace Dokku {
         private bool showing_desktop = false;
 
         public void activate() {
-            var screen = WindowManager.default_screen();
-            if (screen == null) return;  // not on X11
-            showing_desktop = !showing_desktop;
-            screen.toggle_showing_desktop(showing_desktop);
+            if (WindowManager.toggle_showing_desktop(!showing_desktop)) {
+                showing_desktop = !showing_desktop;
+            }
         }
 
         public Gtk.Menu? get_menu() {

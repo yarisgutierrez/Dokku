@@ -244,7 +244,7 @@ namespace Dokku {
                     continue;
                 }
 
-                var matched_app = app_manager.find_by_window(window);
+                var matched_app = app_manager.find_by_window(new WnckWindow(window));
                 if (matched_app != null && matched_app.id == app_id) {
                     result.append(window);
                 }

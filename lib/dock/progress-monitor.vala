@@ -171,7 +171,7 @@ namespace Dokku {
 
             if (!looks_like_progress_window(window)) return;
 
-            var app = app_manager.find_by_window(window);
+            var app = app_manager.find_by_window(new WnckWindow(window));
             if (app == null) return;
 
             // Don't override explicit LauncherEntry progress (it's determinate & more precise)

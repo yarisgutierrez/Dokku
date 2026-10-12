@@ -7,6 +7,16 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Window tracking on Wayland.** Running-app indicators, the window list for apps with
+  several windows, click to focus, Close Window, clearing a notification badge when the app
+  is focused, and the Show Desktop button now work on compositors that provide
+  `wlr-foreign-toplevel-management` (sway, labwc, Wayfire, Hyprland). Dodge windows works
+  there too for maximized and fullscreen windows, per screen. Attention bounce and Force
+  Close stay X11-only, since Wayland does not report them. Sway ignores minimize requests,
+  so Show Desktop does nothing under sway. Building needs `wayland-scanner`
+  (`libwayland-bin`); without it Dokku still builds, with window tracking left out.
+- Windows are matched to apps by the desktop file's `StartupWMClass` as well, on X11 and
+  Wayland.
 - Keyboard navigation in the launcher. Down from the search box moves into the grid, the
   arrow keys move between icons (Right and Left at the edge turn the page), Up from the
   top row returns to search, Enter opens the focused icon, and Page Up/Page Down,
@@ -27,6 +37,9 @@ All notable changes to Dokku are listed here. The format follows
   lists at the top level (Terminal Emulator, File Manager, Web Browser, ...) and uncategorised
   apps are never folded. Searching or choosing a category still shows every app. It is on by
   default and can be turned off under Settings > Launcher > Group apps by category.
+- The launcher no longer lists the Xfce "preferred application" wrappers (Mail Reader, Web
+  Browser, File Manager, Terminal Emulator) or Log Out and About Xfce. They only duplicate other apps. They are
+  still known to Dokku, so a pinned dock icon for one keeps working.
 - Search results are ranked by how well they match: an exact name first, then names that
   start with what you typed, then a word within the name, then anywhere in the name, then
   the app id or command. Launch count only breaks ties.

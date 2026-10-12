@@ -28,17 +28,26 @@ namespace Dokku {
     public class Capabilities : GLib.Object {
         public SessionType session { get; private set; }
         public bool layer_shell { get; private set; }
+        // The compositor lists windows to clients (wlr-foreign-toplevel-management)
+        public bool window_list { get; private set; }
 
-        public Capabilities(SessionType session, bool layer_shell) {
+        public Capabilities(SessionType session, bool layer_shell, bool window_list = false) {
             this.session = session;
             this.layer_shell = layer_shell;
+            this.window_list = window_list;
         }
 
         public bool supports(Feature feature) {
-            // Everything below currently depends on X11 libraries. A Wayland window
-            // tracker (zwlr_foreign_toplevel_manager_v1) would enable
-            // WINDOW_TRACKING and DODGE_WINDOWS there.
-            return session == SessionType.X11;
+            switch (feature) {
+                case WINDOW_TRACKING:
+                case DODGE_WINDOWS:
+                    // X11 has libwnck; Wayland has it only where the compositor lists windows
+                    return session == SessionType.X11 ||
+                           (session == SessionType.WAYLAND && window_list);
+                default:
+                    // Hotkeys (keybinder) and blur (picom) depend on X11
+                    return session == SessionType.X11;
+            }
         }
 
         // Human-readable reason a feature is unavailable, or null if it is available.
@@ -48,7 +57,7 @@ namespace Dokku {
             switch (feature) {
                 case WINDOW_TRACKING:
                 case DODGE_WINDOWS:
-                    return wayland ? "Not available on Wayland yet (needs window tracking)"
+                    return wayland ? "Not available here: this Wayland compositor does not list windows (no wlr-foreign-toplevel-management)"
                                    : "Needs an X11 session";
                 case GLOBAL_HOTKEYS:
                     return wayland ? "Not available on Wayland. Bind a key in your compositor to run \"dokku --launcher\""
@@ -86,7 +95,11 @@ namespace Dokku {
             } else if (display != null && display.get_type().name() == "GdkWaylandDisplay") {
                 type = SessionType.WAYLAND;
             }
-            return new Capabilities(type, type == SessionType.WAYLAND && GtkLayerShell.is_supported());
+            bool window_list = false;
+#if HAVE_WAYLAND_TRACKER
+            window_list = type == SessionType.WAYLAND && WaylandWindows.get_default() != null;
+#endif
+            return new Capabilities(type, type == SessionType.WAYLAND && GtkLayerShell.is_supported(), window_list);
         }
     }
 }

@@ -11,6 +11,11 @@ add_project_link_arguments('-Wl,-z,relro', '-Wl,-z,now', language: 'c')
 
 atspi_dep = dependency('atspi-2', required: false)
 
+# Window tracking on Wayland needs wayland-scanner at build time (libwayland-bin).
+# Without it Dokku still builds, and just can't see windows on Wayland.
+wayland_client_dep = dependency('wayland-client', required: false)
+wayland_scanner = find_program('wayland-scanner', required: false)
+
 dependencies = [
   dependency('gtk+-3.0'),
   dependency('glib-2.0'),
@@ -22,6 +27,12 @@ dependencies = [
   dependency('x11'),
   cc.find_library('m', required: true),
 ]
+
+if wayland_client_dep.found() and wayland_scanner.found()
+  dependencies += wayland_client_dep
+  add_project_arguments('-D', 'HAVE_WAYLAND_TRACKER', language: 'vala')
+  add_project_arguments('--pkg', 'dokku-toplevel', language: 'vala')
+endif
 
 if atspi_dep.found()
   dependencies += atspi_dep

@@ -11,11 +11,15 @@ namespace Dokku {
         public bool toplevel { get; set; default = false; }
         // False for the catch-all category and top-level entries: the launcher never folders them
         public bool groupable { get; set; default = false; }
+        // Not worth a launcher icon: it only duplicates another app (see REDUNDANT_APPS)
+        public bool redundant { get; set; default = false; }
 
         // Pre-cached lowercase strings for O(n) matching in find_by_window slow path
         public string id_lower { get; set; default = ""; }
         public string name_lower { get; set; default = ""; }
         public string exec_base { get; set; default = ""; }
+        // StartupWMClass: what the app's windows call themselves when that differs from the id
+        public string wm_class_lower { get; set; default = ""; }
 
         // Set to true when NoDisplay=true — these apps should not appear in the launcher
         public bool no_display { get; set; default = false; }
@@ -179,6 +183,10 @@ namespace Dokku {
                 }
                 resolve_display_category();
 
+                if (keyfile.has_key("Desktop Entry", "StartupWMClass")) {
+                    wm_class_lower = keyfile.get_string("Desktop Entry", "StartupWMClass").down();
+                }
+
                 // Read NoDisplay in the same KeyFile pass — avoids a second file open
                 if (keyfile.has_key("Desktop Entry", "NoDisplay")) {
                     no_display = keyfile.get_boolean("Desktop Entry", "NoDisplay");
@@ -233,6 +241,7 @@ namespace Dokku {
         private HashTable<string, AppInfo> apps;
         private HashTable<string, AppInfo> class_name_index;
         private HashTable<string, AppInfo> exec_base_index;
+        private HashTable<string, AppInfo> wm_class_index;
         private HashTable<string, GenericArray<weak AppInfo>> category_index;
         private GenericArray<FileMonitor> dir_monitors;
         private uint reload_timeout_id = 0;
@@ -249,12 +258,22 @@ namespace Dokku {
         // the built-in category table in AppInfo
         private MenuCategories? menu_categories = null;
 
+        // The Xfce menu lists these "preferred application" wrappers by default. They only
+        // duplicate the real Mail, Browser, File Manager and Terminal apps (and the session
+        // controls live elsewhere), so the launcher leaves them out. The apps themselves stay known
+        // to Dokku, so a pinned dock icon or a running window still matches.
+        private const string[] REDUNDANT_APPS = {
+            "xfce4-mail-reader", "xfce4-web-browser", "xfce4-file-manager",
+            "xfce4-terminal-emulator", "xfce4-session-logout", "xfce4-about"
+        };
+
         public signal void apps_changed();
 
         public AppManager() {
             apps = new HashTable<string, AppInfo>(str_hash, str_equal);
             class_name_index = new HashTable<string, AppInfo>(str_hash, str_equal);
             exec_base_index = new HashTable<string, AppInfo>(str_hash, str_equal);
+            wm_class_index = new HashTable<string, AppInfo>(str_hash, str_equal);
             category_index = new HashTable<string, GenericArray<weak AppInfo>>(str_hash, str_equal);
             dir_monitors = new GenericArray<FileMonitor>();
             app_dirs += Path.build_filename(Environment.get_user_data_dir(), "applications");
@@ -319,6 +338,7 @@ namespace Dokku {
 
                 var app = new AppInfo.from_desktop_file(path);
                 if (menu_categories != null) menu_categories.apply(app);
+                app.redundant = app.id in REDUNDANT_APPS;
                 if (app.exec != "" && !app.no_display) {
                     apps.set(app.id, app);
                 }
@@ -329,6 +349,7 @@ namespace Dokku {
         private void build_indices() {
             class_name_index.remove_all();
             exec_base_index.remove_all();
+            wm_class_index.remove_all();
             category_index.remove_all();
             foreach (var app in apps.get_values()) {
                 // Use the pre-cached lowercase fields computed in from_desktop_file()
@@ -336,6 +357,9 @@ namespace Dokku {
                 class_name_index.set(app.id_lower, app);
                 if (app.exec_base != "") {
                     exec_base_index.set(app.exec_base, app);
+                }
+                if (app.wm_class_lower != "" && !wm_class_index.contains(app.wm_class_lower)) {
+                    wm_class_index.set(app.wm_class_lower, app);
                 }
                 // Build category index
                 string cat = app.display_category;
@@ -365,30 +389,29 @@ namespace Dokku {
             return apps.get_values();
         }
 
-        public AppInfo? find_by_window(Wnck.Window window) {
-            var wnck_app = window.get_application();
-            if (wnck_app == null) return null;
-
-            string? class_group = window.get_class_group_name();
-            string? class_instance = window.get_class_instance_name();
-            string cg = class_group != null ? class_group.down() : "";
-            string ci = class_instance != null ? class_instance.down() : "";
+        public AppInfo? find_by_window(TrackedWindow window) {
+            string app_name = window.application_name.down();
+            string cg = window.app_id.down();
+            string ci = window.class_instance.down();
+            if (app_name == "" && cg == "" && ci == "") return null;
+            if (app_name == "") app_name = cg != "" ? cg : ci;
 
             // Fast path: O(1) exact match on class_group or class_instance
             AppInfo? match = null;
             if (cg != "") {
                 match = class_name_index.get(cg);
                 if (match == null) match = exec_base_index.get(cg);
+                if (match == null) match = wm_class_index.get(cg);
             }
             if (match == null && ci != "") {
                 match = class_name_index.get(ci);
                 if (match == null) match = exec_base_index.get(ci);
+                if (match == null) match = wm_class_index.get(ci);
             }
             if (match != null) return match;
 
             // Slow path: fall back to full scan for partial matches
             // Uses pre-cached lowercase fields (id_lower, name_lower, exec_base)
-            string app_name = wnck_app.get_name().down();
             AppInfo? best_match = null;
             int best_score = 0;
 

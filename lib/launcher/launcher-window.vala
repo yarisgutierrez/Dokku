@@ -381,7 +381,7 @@ namespace Dokku {
             match_scores.remove_all();
 
             foreach (var app in app_manager.get_all_apps()) {
-                if (config.is_app_hidden(app.id)) continue;
+                if (app.redundant || config.is_app_hidden(app.id)) continue;
                 if (config.get_app_folder(app.id) != null) continue;
 
                 // Category filter
