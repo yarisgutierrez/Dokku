@@ -1296,6 +1296,16 @@ namespace Dokku {
             // Hover popup: multi-window apps get preview, others get name tooltip
             if (hovered_index >= 0 && !is_reordering && !folder_popup.is_open) {
                 var hovered_item = items.nth_data(hovered_index);
+                if (hovered_item != null && hovered_item.is_media_widget && hovered_item.plugin is MediaPlugin) {
+                    // The now-playing popup opens once the pointer rests on the widget
+                    preview.cancel_timer();
+                    preview.dismiss();
+                    media_popup.request(hovered_item.plugin as MediaPlugin, hovered_index);
+                    schedule_redraw();
+                    return true;
+                }
+                media_popup.cancel_request();
+                media_popup.schedule_dismiss();
                 if (hovered_item != null && hovered_item.running && hovered_item.windows.length() > 1) {
                     // Multi-window: window preview popup after 400ms
                     if (preview.target_index != hovered_index) {
@@ -1321,6 +1331,8 @@ namespace Dokku {
                 }
             } else {
                 preview.cancel_timer();
+                media_popup.cancel_request();
+                media_popup.schedule_dismiss();
             }
 
             schedule_redraw();
@@ -1354,6 +1366,7 @@ namespace Dokku {
 
             preview.cancel_timer();
             preview.schedule_dismiss();
+            media_popup.cancel_request();
             media_popup.schedule_dismiss();
 
             // Only hide if auto-hide or dodge-hiding is active
@@ -1670,7 +1683,7 @@ namespace Dokku {
             if (item.is_media_widget && item.plugin is MediaPlugin) {
                 var mp = item.plugin as MediaPlugin;
                 if (is_vertical) {
-                    media_popup.show(mp, index);
+                    media_popup.open(mp, index);
                     return;
                 }
                 double item_start, item_w;
@@ -1680,10 +1693,13 @@ namespace Dokku {
                 double pad = 6;
                 int ctrl_sz = 20;
                 double skip_x = item_start + widget_w - pad - ctrl_sz;
+                double pause_x = skip_x - 6 - ctrl_sz;
                 if (click_x >= skip_x && click_x <= skip_x + ctrl_sz) {
                     mp.next();
+                } else if (click_x >= pause_x && click_x <= pause_x + ctrl_sz) {
+                    mp.activate();
                 } else {
-                    mp.activate();  // play/pause button, or anywhere else on the widget
+                    media_popup.open(mp, index);  // the art or the text
                 }
                 return;
             }

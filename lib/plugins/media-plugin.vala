@@ -8,7 +8,17 @@ namespace Dokku {
 
         public string track_title { get; private set; default = ""; }
         public string track_artist { get; private set; default = ""; }
+        public string track_album { get; private set; default = ""; }
         public string art_url { get; private set; default = ""; }
+        // Track length in microseconds, 0 when the player does not say (live streams)
+        public int64 track_length_us { get; private set; default = 0; }
+        public bool can_seek {
+            get {
+                if (player_proxy == null) return false;
+                var v = player_proxy.get_cached_property("CanSeek");
+                return v != null && v.get_boolean();
+            }
+        }
         public bool is_playing { get { return _playing; } }
         public bool has_media { get { return _has_media; } }
         public string player_name { get; private set; default = ""; }
@@ -19,6 +29,7 @@ namespace Dokku {
         private bool _has_media = false;
         private DBusProxy? player_proxy = null;
         private string? current_bus_name = null;
+        private string track_id = "";
         private Gdk.Pixbuf? _art_pixbuf = null;
         private Gdk.Pixbuf? _art_scaled = null;
         private int _art_cached_size = 0;
@@ -171,6 +182,9 @@ namespace Dokku {
             player_name = "";
             track_title = "";
             track_artist = "";
+            track_album = "";
+            track_length_us = 0;
+            track_id = "";
             art_url = "";
             _art_pixbuf = null;
             _art_scaled = null;
@@ -278,6 +292,20 @@ namespace Dokku {
                 track_artist = "";
             }
 
+            var album_val = metadata.lookup_value("xesam:album", VariantType.STRING);
+            track_album = album_val != null ? album_val.get_string() : "";
+
+            // Players differ on the type of the length: int64 (most) or uint64 (Spotify)
+            track_length_us = 0;
+            var length_val = metadata.lookup_value("mpris:length", null);
+            if (length_val != null) {
+                if (length_val.is_of_type(VariantType.INT64)) track_length_us = length_val.get_int64();
+                else if (length_val.is_of_type(VariantType.UINT64)) track_length_us = (int64) length_val.get_uint64();
+            }
+            var id_val = metadata.lookup_value("mpris:trackid", null);
+            track_id = id_val != null && (id_val.is_of_type(VariantType.OBJECT_PATH) || id_val.is_of_type(VariantType.STRING))
+                ? id_val.get_string() : "";
+
             // Album art URL
             var art_val = metadata.lookup_value("mpris:artUrl", VariantType.STRING);
             string new_art_url = art_val != null ? art_val.get_string() : "";
@@ -368,6 +396,34 @@ namespace Dokku {
                 (obj, res) => {
                     try { player_proxy.call.end(res); }
                     catch (Error e) { warning("MediaPlugin: Previous failed: %s", e.message); }
+                }
+            );
+        }
+
+        // Where the player is in the track, in microseconds, or -1. MPRIS sends no change
+        // signal for Position, so it has to be asked for.
+        public async int64 get_position() {
+            if (player_proxy == null || current_bus_name == null) return -1;
+            try {
+                var reply = yield player_proxy.get_connection().call(
+                    current_bus_name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "Get",
+                    new Variant("(ss)", "org.mpris.MediaPlayer2.Player", "Position"),
+                    new VariantType("(v)"), DBusCallFlags.NONE, 1000, null);
+                Variant boxed;
+                reply.get("(v)", out boxed);
+                return boxed.get_int64();
+            } catch (Error e) {
+                return -1;
+            }
+        }
+
+        public void seek_to(int64 position_us) {
+            if (player_proxy == null || track_id == "" || !can_seek) return;
+            player_proxy.call.begin(
+                "SetPosition", new Variant("(ox)", track_id, position_us), DBusCallFlags.NONE, 5000, null,
+                (obj, res) => {
+                    try { player_proxy.call.end(res); }
+                    catch (Error e) { warning("MediaPlugin: SetPosition failed: %s", e.message); }
                 }
             );
         }

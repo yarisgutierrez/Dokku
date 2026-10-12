@@ -15,7 +15,8 @@ Wayland. Written in Vala (GTK3, Cairo).
 - **Window previews** on hover for apps with several windows (X11)
 - **Notification badges, progress bars and launch/attention bounce**
 - **Recent files** in the right-click menu
-- **Media widget** (MPRIS2) with album art
+- **Media widget** (MPRIS2) with album art; rest the pointer on it for a popup with the
+  artist, song, album, a seek bar and playback controls
 - **Frosted glass** blur via a compositor such as picom (X11)
 - **Launcher:** full-screen app grid with search and keyboard navigation
 - **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
