@@ -1779,8 +1779,18 @@ namespace Dokku {
 
             context_menu = new Gtk.Menu();
 
+            // Dock Settings lives only on the Applications button
+            if (item.is_launcher) {
+                var st = new Gtk.MenuItem.with_label("Dock Settings...");
+                st.activate.connect(() => settings_requested());
+                context_menu.append(st);
+                context_menu.show_all();
+                context_menu.popup_at_pointer(event);
+                return;
+            }
+
             if (item.running) {
-                var nw = new Gtk.MenuItem.with_label("Open New Window");
+                var nw = new Gtk.MenuItem.with_label("New Window");
                 nw.activate.connect(() => { var a = app_manager.get_app(item.id); if (a != null) { usage_tracker.record_launch(item.id); a.launch(); trigger_bounce(item.id, true); } });
                 context_menu.append(nw);
             }
@@ -1799,27 +1809,44 @@ namespace Dokku {
                 context_menu.append(new Gtk.SeparatorMenuItem());
             }
 
+            var options = new Gtk.Menu();
             if (item.pinned) {
                 var unpin = new Gtk.MenuItem.with_label("Unpin from Dock");
                 unpin.activate.connect(() => {
                     if (item.running) item.pinned = false; else items.remove(item);
                     save_pinned_apps(); schedule_redraw();
                 });
-                context_menu.append(unpin);
+                options.append(unpin);
             } else {
                 var pin = new Gtk.MenuItem.with_label("Pin to Dock");
                 pin.activate.connect(() => { item.pinned = true; save_pinned_apps(); schedule_redraw(); });
-                context_menu.append(pin);
+                options.append(pin);
             }
+            var props = new Gtk.MenuItem.with_label("Properties...");
+            props.activate.connect(() => properties_dialog.show(item));
+            options.append(props);
+            var options_mi = new Gtk.MenuItem.with_label("Options");
+            options_mi.submenu = options;
+            context_menu.append(options_mi);
 
             if (item.running && item.windows.length() > 0) {
                 context_menu.append(new Gtk.SeparatorMenuItem());
-                var cl = new Gtk.MenuItem.with_label("Close Window");
-                cl.activate.connect(() => item.windows.nth_data(0).close());
-                context_menu.append(cl);
-                
-                // Wayland doesn't tell us another window's PID, so there is nothing to kill
-                if (item.windows.nth_data(0).get_pid() > 0) {
+                var hide = new Gtk.MenuItem.with_label("Hide");
+                hide.activate.connect(() => {
+                    foreach (var window in item.windows) {
+                        if (!window.is_minimized) window.minimize();
+                    }
+                });
+                context_menu.append(hide);
+
+                var quit = new Gtk.MenuItem.with_label("Quit");
+                quit.activate.connect(() => AppQuit.quit.begin(item.id, item.windows));
+                context_menu.append(quit);
+
+                // Force Close only shows when Shift is held as the menu opens. Wayland doesn't
+                // tell us another window's PID, so there it has nothing to kill.
+                if ((event.state & Gdk.ModifierType.SHIFT_MASK) != 0 &&
+                    item.windows.nth_data(0).get_pid() > 0) {
                     var force_close = new Gtk.MenuItem.with_label("Force Close");
                     force_close.activate.connect(() => {
                         var window = item.windows.nth_data(0);
@@ -1833,18 +1860,6 @@ namespace Dokku {
                     context_menu.append(force_close);
                 }
             }
-
-            if (!item.is_launcher) {
-                context_menu.append(new Gtk.SeparatorMenuItem());
-                var props = new Gtk.MenuItem.with_label("Properties...");
-                props.activate.connect(() => properties_dialog.show(item));
-                context_menu.append(props);
-            }
-
-            context_menu.append(new Gtk.SeparatorMenuItem());
-            var st = new Gtk.MenuItem.with_label("Dock Settings...");
-            st.activate.connect(() => settings_requested());
-            context_menu.append(st);
 
             context_menu.show_all();
             context_menu.popup_at_pointer(event);

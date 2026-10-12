@@ -45,7 +45,9 @@ namespace Dokku {
             if (handle != null) handle.close();
         }
 
-        internal void minimize(bool minimized) {
+        public override void minimize() { set_minimized(true); }
+
+        internal void set_minimized(bool minimized) {
             if (handle != null) handle.set_minimized(minimized);
         }
     }
@@ -147,11 +149,11 @@ namespace Dokku {
                 foreach (var w in get_windows()) {
                     if (w.is_minimized || !w.is_application_window) continue;
                     hidden_by_show_desktop.append(w);
-                    w.minimize(true);
+                    w.set_minimized(true);
                 }
             } else {
                 foreach (var w in hidden_by_show_desktop) {
-                    w.minimize(false);
+                    w.set_minimized(false);
                 }
                 hidden_by_show_desktop = new List<WaylandWindow>();
             }

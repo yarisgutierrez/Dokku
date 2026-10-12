@@ -29,6 +29,7 @@ namespace Dokku {
 
         public abstract void activate();
         public abstract void close();
+        public abstract void minimize();
 
         public bool is_dokku_window() {
             return app_id.down() == "org.dokku.app";
@@ -86,5 +87,6 @@ namespace Dokku {
 
         public override void activate() { window.activate(Gtk.get_current_event_time()); }
         public override void close() { window.close(Gtk.get_current_event_time()); }
+        public override void minimize() { window.minimize(); }
     }
 }

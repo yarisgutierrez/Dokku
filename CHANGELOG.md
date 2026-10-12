@@ -8,7 +8,7 @@ All notable changes to Dokku are listed here. The format follows
 
 ### Added
 - **Window tracking on Wayland.** Running-app indicators, the window list for apps with
-  several windows, click to focus, Close Window, clearing a notification badge when the app
+  several windows, click to focus, Hide and Quit, clearing a notification badge when the app
   is focused, and the Show Desktop button now work on compositors that provide
   `wlr-foreign-toplevel-management` (sway, labwc, Wayfire, Hyprland). Dodge windows works
   there too for maximized and fullscreen windows, per screen. Attention bounce and Force
@@ -26,6 +26,11 @@ All notable changes to Dokku are listed here. The format follows
   keyboard with the Menu key or Shift+F10.
 
 ### Changed
+- **App menu reworked.** Pin and Unpin now sit in an Options submenu with Properties.
+  Hide minimizes the app's windows (sway ignores that), and Quit asks the app to quit
+  through its GApplication `quit` action when it has one, or closes all its windows. Force
+  Close appears only when Shift is held as the menu opens. "Open New Window" is now "New
+  Window". Dock Settings moved to the Applications button's menu (folders keep it).
 - Apps are now filed into categories by the desktop's own application menu
   (`/etc/xdg/menus/xfce-applications.menu`, read directly, with no new library) instead of a
   table of Dokku's own. Settings entries stay together even when they also claim another
