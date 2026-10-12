@@ -19,6 +19,7 @@ namespace Dokku {
         private Gtk.Window? popup = null;
         private uint fade_tick = 0;
         private int64 fade_start = 0;
+        private double fade_from = 0;
         private bool fading_out = false;
         private bool pointer_inside = false;
         private uint dismiss_id = 0;
@@ -59,26 +60,31 @@ namespace Dokku {
         private int64 pending_us = 0;
         private int64 settle_until = 0;
 
-        public void dismiss() {
+        // Fade the popup in or out from wherever its opacity is now, so a dismiss that lands
+        // mid fade-in turns around instead of leaving the popup stuck half way
+        private void start_fade(bool out_) {
             if (popup == null) return;
-            if (fading_out) return;  // already fading
-            fading_out = true;
+            fade_from = ((Gtk.Widget) popup).opacity;
+            fading_out = out_;
             fade_start = GLib.get_monotonic_time();
-            if (fade_tick != 0) return;  // reuse tick
+            if (fade_tick != 0) return;  // the running tick follows the new direction
             fade_tick = popup.add_tick_callback((widget, clock) => {
-                int64 elapsed = clock.get_frame_time() - fade_start;
-                double t = double.min(1.0, elapsed / (FADE_MS * 1000.0));
-                if (popup != null) {
-                    ((Gtk.Widget)popup).opacity = 1.0 - t;
-                }
-                if (t >= 1.0) {
-                    fade_tick = 0;
+                double t = ((clock.get_frame_time() - fade_start) / (FADE_MS * 1000.0)).clamp(0.0, 1.0);
+                double target = fading_out ? 0.0 : 1.0;
+                ((Gtk.Widget) widget).opacity = fade_from + (target - fade_from) * t;
+                if (t < 1.0) return true;
+                fade_tick = 0;
+                if (fading_out) {
                     fading_out = false;
                     destroy_popup();
-                    return false;
                 }
-                return true;
+                return false;
             });
+        }
+
+        public void dismiss() {
+            if (popup == null || fading_out) return;
+            start_fade(true);
         }
 
         public void schedule_dismiss() {
@@ -129,6 +135,8 @@ namespace Dokku {
 
         private void destroy_popup() {
             teardown();
+            fade_tick = 0;   // the tick dies with the window
+            fading_out = false;
             if (popup != null) { popup.destroy(); popup = null; }
         }
 
@@ -285,8 +293,11 @@ namespace Dokku {
 
         public void open(MediaPlugin target, int index) {
             cancel_request();
-            if (popup != null && !fading_out) { cancel_dismiss(); return; }
-            if (popup != null) destroy_popup();   // still fading out: start afresh
+            cancel_dismiss();   // a timer left from an earlier popup must not close this one
+            if (popup != null) {
+                if (fading_out) start_fade(false);   // closing: bring it back instead of rebuilding
+                return;
+            }
 
             pointer_inside = false;
             mp = target;
@@ -422,20 +433,7 @@ namespace Dokku {
             host.show_popup(popup, index, 8);
 
             // Fade in
-            fading_out = false;
-            fade_start = GLib.get_monotonic_time();
-            fade_tick = popup.add_tick_callback((widget, clock) => {
-                int64 elapsed = clock.get_frame_time() - fade_start;
-                double t = double.min(1.0, elapsed / (FADE_MS * 1000.0));
-                if (popup != null) {
-                    ((Gtk.Widget)popup).opacity = t;
-                }
-                if (t >= 1.0) {
-                    fade_tick = 0;
-                    return false;
-                }
-                return true;
-            });
+            start_fade(false);
 
             // Track mouse enter/leave on popup for dismiss-on-leave
             popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
