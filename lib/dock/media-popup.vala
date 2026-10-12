@@ -169,7 +169,7 @@ namespace Dokku {
                     "button.media-play { background: %s; color: %s; border-radius: 15px; ".printf(accent, on_accent) +
                     "min-width: 48px; min-height: 30px; padding: 0; } " +
                     "button.media-play:hover { background: %s; } ".printf(hex(ar * 0.85, ag * 0.85, ab * 0.85)) +
-                    "scale highlight, scale trough highlight { background-image: none; background-color: %s; border-color: %s; } ".printf(accent, accent) +
+                    "scale highlight, scale trough highlight { background-image: none; background-color: %s; border: none; } ".printf(accent) +
                     "scale slider { background-color: %s; border-color: %s; } ".printf(accent, accent));
             } catch (Error e) {}
             popup.queue_draw();
@@ -306,8 +306,9 @@ namespace Dokku {
                     "button { color: %s; } button:hover { background: %s; } ".printf(fg, hover) +
                     ".media-title { color: %s; font-size: 14px; } .media-artist { color: %s; } ".printf(fg, dim) +
                     ".media-album, .media-time { color: %s; } .media-time { font-size: 11px; } ".printf(dim) +
-                    "scale trough { min-height: 3px; background-image: none; background-color: %s; } ".printf(track) +
-                    "scale slider { min-width: 10px; min-height: 10px; background-image: none; }");
+                    "scale trough { min-height: 2px; border: none; border-radius: 1px; background-image: none; background-color: %s; } ".printf(track) +
+                    "scale highlight { border: none; border-radius: 1px; } " +
+                    "scale slider { min-width: 10px; min-height: 10px; border-radius: 9999px; background-image: none; box-shadow: none; }");
             } catch (Error e) {}
             accent_css = new Gtk.CssProvider();
 
@@ -353,7 +354,7 @@ namespace Dokku {
             len_label.show();
             seek = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0, 1, 1);
             seek.draw_value = false;
-            seek.set_size_request(240, -1);
+            seek.set_size_request(240, 14);
             seek.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             seek.get_style_context().add_provider(accent_css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             seek.show();
