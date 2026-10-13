@@ -54,6 +54,24 @@ namespace Dokku {
             });
 
             this.hide.connect(flush_apply);
+
+            // The Monitors section lists what is connected, so it follows hot-plug
+            var screen_display = Gdk.Display.get_default();
+            if (screen_display != null) {
+                screen_display.monitor_added.connect(() => schedule_monitor_refresh());
+                screen_display.monitor_removed.connect(() => schedule_monitor_refresh());
+            }
+        }
+
+        private uint monitor_refresh_id = 0;
+
+        private void schedule_monitor_refresh() {
+            if (monitor_refresh_id != 0) return;
+            monitor_refresh_id = Timeout.add(500, () => {
+                monitor_refresh_id = 0;
+                rebuild_ui();
+                return Source.REMOVE;
+            });
         }
 
         private void schedule_apply() {
@@ -429,6 +447,13 @@ namespace Dokku {
             vis_card.pack_start(vis_grid, true, true, 0);
             outer.pack_start(vis_card, false, false, 0);
 
+            // --- Monitors section: only when there is more than one to tell apart ---
+            var display = Gdk.Display.get_default();
+            if (display != null && display.get_n_monitors() > 1) {
+                outer.pack_start(make_section_header("Monitors"), false, false, 0);
+                outer.pack_start(create_monitors_card(display), false, false, 0);
+            }
+
             // --- Animations section ---
             outer.pack_start(make_section_header("Animations"), false, false, 0);
 
@@ -686,6 +711,89 @@ namespace Dokku {
 
             scroll.add(outer);
             return scroll;
+        }
+
+        // One row per connected monitor: its own edge, icon size and auto-hide, or "Default"
+        // to follow the settings above
+        private Gtk.Widget create_monitors_card(Gdk.Display display) {
+            var card = make_card();
+            var grid = make_card_grid();
+            string[] keys = MonitorKey.all(display);
+            int row = 0;
+
+            var note = new Gtk.Label("<small>Each monitor can have its own edge, icon size and auto-hide. " +
+                                     "Default follows the settings for all monitors. Turn on Show on all monitors " +
+                                     "to get a dock on each one.</small>");
+            note.use_markup = true;
+            note.wrap = true;
+            note.xalign = 0;
+            note.max_width_chars = 70;
+            note.get_style_context().add_class("dim-label");
+            grid.attach(note, 0, row++, 2, 1);
+
+            for (int i = 0; i < keys.length; i++) {
+                string key = keys[i];
+                grid.attach(make_setting_label(MonitorKey.label(display, i), "Settings for this monitor"),
+                            0, row, 1, 1);
+
+                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+                box.halign = Gtk.Align.END;
+                box.valign = Gtk.Align.CENTER;
+
+                // Edge
+                var edge = new Gtk.ComboBoxText();
+                edge.append("", "Edge: Default");
+                edge.append("bottom", "Bottom");
+                edge.append("top", "Top");
+                edge.append("left", "Left");
+                edge.append("right", "Right");
+                edge.active_id = config.get_monitor_position(key) ?? "";
+                edge.changed.connect(() => {
+                    string id = edge.active_id ?? "";
+                    config.set_monitor_position(key, id == "" ? null : id);
+                    schedule_apply();
+                });
+                box.pack_start(edge, false, false, 0);
+
+                // Icon size: Default follows the setting for all monitors
+                var size = new Gtk.ComboBoxText();
+                size.append("0", "Size: Default");
+                int[] presets = { 24, 32, 40, 48, 56, 64, 80, 96, 128 };
+                int current = config.get_monitor_icon_size(key);
+                bool listed = current == 0;
+                foreach (int preset in presets) {
+                    if (current > 0 && !listed && current < preset) {
+                        size.append(current.to_string(), "%d px".printf(current));
+                        listed = true;
+                    }
+                    if (preset == current) listed = true;
+                    size.append(preset.to_string(), "%d px".printf(preset));
+                }
+                if (!listed) size.append(current.to_string(), "%d px".printf(current));
+                size.active_id = current.to_string();
+                size.changed.connect(() => {
+                    config.set_monitor_icon_size(key, int.parse(size.active_id ?? "0"));
+                    schedule_apply();
+                });
+                box.pack_start(size, false, false, 0);
+
+                // Auto-hide
+                var hide_combo = new Gtk.ComboBoxText();
+                hide_combo.append("-1", "Auto-hide: Default");
+                hide_combo.append("1", "On");
+                hide_combo.append("0", "Off");
+                hide_combo.active_id = config.get_monitor_auto_hide(key).to_string();
+                hide_combo.changed.connect(() => {
+                    config.set_monitor_auto_hide(key, int.parse(hide_combo.active_id ?? "-1"));
+                    schedule_apply();
+                });
+                box.pack_start(hide_combo, false, false, 0);
+
+                grid.attach(box, 1, row++, 1, 1);
+            }
+
+            card.pack_start(grid, true, true, 0);
+            return card;
         }
 
         // --- Export, import and reset ---

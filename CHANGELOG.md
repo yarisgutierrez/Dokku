@@ -7,6 +7,11 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Per-monitor dock settings.** With more than one monitor, Settings, Behavior, Monitors lists
+  each one with its own edge, icon size and auto-hide; "Default" follows the settings for all
+  monitors. They are kept in `[Monitor:<make> <model> <size>]` sections of `config.ini`
+  (identical monitors are numbered `#1`, `#2` from left to right). Turn on Show on all
+  monitors to get a dock on each one.
 - **Clock, Battery and Volume widgets.** Three plugins ship with Dokku and start switched off;
   enable them under Settings, Behavior. The clock shows the time with the date as its tooltip,
   the battery shows the charge (and hides itself on a machine without one), and the volume
@@ -94,6 +99,8 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **`Reload` over D-Bus only reloaded the main dock.** It now does what changing a setting does:
+  every dock (one per monitor), the launcher and the hotkeys pick up the new settings.
 - **Launcher fade-out stuttered under picom.** The fade repainted the whole fullscreen window
   every frame, which picom's GL backend could not keep up with. On X11 the launcher now fades
   through `_NET_WM_WINDOW_OPACITY` and the compositor does the blending. It is also tagged

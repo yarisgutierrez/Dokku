@@ -9,6 +9,7 @@ Wayland. Written in Vala (GTK3, Cairo).
 
 - **Dock** with magnification, running-app indicators, and Cairo-drawn themes
 - **Positioning** on any screen edge (bottom, top, left, right), with multi-monitor support
+  and separate settings for each monitor
 - **Visibility:** auto-hide, and "dodge windows" (hide when windows overlap; X11)
 - **Drag and drop:** reorder icons, or drag a pinned app off the dock to unpin it
 - **Folders:** group pinned apps into dock folders

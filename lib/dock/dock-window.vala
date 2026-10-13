@@ -251,11 +251,8 @@ namespace Dokku {
                 blur_backdrop.shutdown();
             });
 
-            auto_hide = config.get_auto_hide();
             dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
-            dock_position = config.get_position();
-            is_vertical = (dock_position == "left" || dock_position == "right");
-            renderer.icon_size = config.get_icon_size();
+            apply_monitor_settings();
             renderer.magnification = config.get_magnification();
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();
@@ -283,6 +280,27 @@ namespace Dokku {
             } else {
                 position_dock();
             }
+            // This monitor may have settings of its own (another edge, another icon size)
+            string key = MonitorKey.for_monitor(Gdk.Display.get_default(), monitor);
+            if (key != monitor_key
+                || config.get_position_for(key) != dock_position
+                || config.get_icon_size_for(key) != renderer.icon_size
+                || config.get_auto_hide_for(key) != auto_hide) {
+                reload_settings();
+            }
+        }
+
+        // The name of the monitor this dock is on, for the settings kept per monitor
+        private string monitor_key = "";
+
+        // Position, icon size and auto-hide: the monitor's own setting where it has one,
+        // otherwise the one for all monitors
+        private void apply_monitor_settings() {
+            monitor_key = MonitorKey.for_monitor(Gdk.Display.get_default(), get_dock_monitor());
+            dock_position = config.get_position_for(monitor_key);
+            is_vertical = (dock_position == "left" || dock_position == "right");
+            renderer.icon_size = config.get_icon_size_for(monitor_key);
+            auto_hide = config.get_auto_hide_for(monitor_key);
         }
 
         public Gdk.Monitor? get_target_monitor_ref() {
@@ -2179,11 +2197,8 @@ namespace Dokku {
             if (media_plugin != null) {
                 media_plugin.set_blocked_players(config.get_media_blocked_players());
             }
-            dock_position = config.get_position();
-            is_vertical = (dock_position == "left" || dock_position == "right");
-            renderer.icon_size = config.get_icon_size();
+            apply_monitor_settings();
             renderer.magnification = config.get_magnification();
-            auto_hide = config.get_auto_hide();
             dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();

@@ -54,6 +54,89 @@ namespace Dokku {
             }
         }
 
+        // --- Per-monitor settings ---
+        //
+        // A monitor can override the position, the icon size and auto-hide. A setting
+        // that is not overridden follows the one for all monitors. Monitors are named by
+        // MonitorKey and kept in a [Monitor:<name>] section.
+
+        private static string monitor_group(string key) {
+            return "Monitor:" + key;
+        }
+
+        private static bool valid_position(string position) {
+            return position == "bottom" || position == "top" || position == "left" || position == "right";
+        }
+
+        // null when this monitor has no override
+        public string? get_monitor_position(string key) {
+            try {
+                string value = keyfile.get_string(monitor_group(key), "position");
+                return valid_position(value) ? value : null;
+            } catch (Error e) {
+                return null;
+            }
+        }
+
+        // 0 when this monitor has no override
+        public int get_monitor_icon_size(string key) {
+            try { return keyfile.get_integer(monitor_group(key), "icon_size").clamp(16, 128); }
+            catch (Error e) { return 0; }
+        }
+
+        // -1 when this monitor has no override, otherwise 0 (off) or 1 (on)
+        public int get_monitor_auto_hide(string key) {
+            try { return keyfile.get_boolean(monitor_group(key), "auto_hide") ? 1 : 0; }
+            catch (Error e) { return -1; }
+        }
+
+        // null clears the override
+        public void set_monitor_position(string key, string? position) {
+            set_monitor_value(key, "position", position != null && valid_position(position) ? position : null);
+        }
+
+        // 0 clears the override
+        public void set_monitor_icon_size(string key, int size) {
+            set_monitor_value(key, "icon_size", size > 0 ? size.clamp(16, 128).to_string() : null);
+        }
+
+        // -1 clears the override
+        public void set_monitor_auto_hide(string key, int state) {
+            set_monitor_value(key, "auto_hide", state < 0 ? null : (state > 0 ? "true" : "false"));
+        }
+
+        private void set_monitor_value(string key, string name, string? value) {
+            if (key == "") return;
+            string group = monitor_group(key);
+            if (value == null) {
+                try {
+                    if (keyfile.has_group(group) && keyfile.has_key(group, name)) {
+                        keyfile.remove_key(group, name);
+                        // An empty section is just clutter
+                        if (keyfile.get_keys(group).length == 0) keyfile.remove_group(group);
+                    }
+                } catch (Error e) {}
+            } else {
+                keyfile.set_value(group, name, value);
+            }
+            save();
+        }
+
+        // What a dock on this monitor uses: the override, or the setting for all monitors
+        public string get_position_for(string monitor_key) {
+            return get_monitor_position(monitor_key) ?? get_position();
+        }
+
+        public int get_icon_size_for(string monitor_key) {
+            int size = get_monitor_icon_size(monitor_key);
+            return size > 0 ? size : get_icon_size();
+        }
+
+        public bool get_auto_hide_for(string monitor_key) {
+            int state = get_monitor_auto_hide(monitor_key);
+            return state < 0 ? get_auto_hide() : state > 0;
+        }
+
         // --- Backup, restore and reset ---
 
         private const int64 MAX_IMPORT_BYTES = 1048576;
@@ -64,7 +147,8 @@ namespace Dokku {
                 case "Media": case "Hotkeys": case "Folders": case "Shortcuts":
                     return true;
                 default:
-                    return group.has_prefix("Folder_") || group.has_prefix("Shortcut_");
+                    return group.has_prefix("Folder_") || group.has_prefix("Shortcut_") ||
+                           group.has_prefix("Monitor:");
             }
         }
 
@@ -131,6 +215,11 @@ namespace Dokku {
             string[,] numbers = { {"Dock", "icon_size"}, {"Dock", "hide_delay"} };
             for (int i = 0; i < numbers.length[0]; i++) {
                 if (k.has_group(numbers[i, 0]) && k.has_key(numbers[i, 0], numbers[i, 1])) k.get_integer(numbers[i, 0], numbers[i, 1]);
+            }
+            foreach (var group in k.get_groups()) {
+                if (!group.has_prefix("Monitor:")) continue;
+                if (k.has_key(group, "icon_size")) k.get_integer(group, "icon_size");
+                if (k.has_key(group, "auto_hide")) k.get_boolean(group, "auto_hide");
             }
             string[,] fractions = { {"Dock", "magnification"}, {"Dock", "dock_opacity"} };
             for (int i = 0; i < fractions.length[0]; i++) {

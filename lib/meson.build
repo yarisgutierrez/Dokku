@@ -24,6 +24,7 @@ libdokku_sources = files(
   'dock/folder-popup.vala',
   'dock/drag-float-popup.vala',
   'dock/compositor-hints.vala',
+  'dock/monitor-key.vala',
   'dock/blur-backdrop.vala',
   'dock/dock-renderer.vala',
   'dock/tracked-window.vala',
