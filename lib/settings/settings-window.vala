@@ -5,6 +5,7 @@ namespace Dokku {
         private ThemeManager theme_manager;
         private PluginManager plugin_manager;
         private Gtk.ComboBoxText theme_combo;
+        private Gtk.Notebook? notebook = null;
         public signal void settings_changed();
 
         // Debounce timer for live apply
@@ -53,6 +54,24 @@ namespace Dokku {
             });
 
             this.hide.connect(flush_apply);
+
+            // The Monitors section lists what is connected, so it follows hot-plug
+            var screen_display = Gdk.Display.get_default();
+            if (screen_display != null) {
+                screen_display.monitor_added.connect(() => schedule_monitor_refresh());
+                screen_display.monitor_removed.connect(() => schedule_monitor_refresh());
+            }
+        }
+
+        private uint monitor_refresh_id = 0;
+
+        private void schedule_monitor_refresh() {
+            if (monitor_refresh_id != 0) return;
+            monitor_refresh_id = Timeout.add(500, () => {
+                monitor_refresh_id = 0;
+                rebuild_ui();
+                return Source.REMOVE;
+            });
         }
 
         private void schedule_apply() {
@@ -155,7 +174,11 @@ namespace Dokku {
 
             set_titlebar(header);
 
-            var notebook = new Gtk.Notebook();
+            build_notebook();
+        }
+
+        private void build_notebook() {
+            notebook = new Gtk.Notebook();
             notebook.margin = 12;
 
             notebook.append_page(create_appearance_tab(), new Gtk.Label("Appearance"));
@@ -163,6 +186,16 @@ namespace Dokku {
             notebook.append_page(create_shortcuts_tab(), new Gtk.Label("Shortcuts"));
 
             add(notebook);
+        }
+
+        // After the settings are replaced from outside the controls, build them again so
+        // they show the new values. The tab being looked at stays.
+        private void rebuild_ui() {
+            int page = notebook != null ? notebook.page : 0;
+            if (notebook != null) remove(notebook);
+            build_notebook();
+            notebook.show_all();
+            notebook.page = page;
         }
 
         // --- Appearance Tab ---
@@ -414,6 +447,13 @@ namespace Dokku {
             vis_card.pack_start(vis_grid, true, true, 0);
             outer.pack_start(vis_card, false, false, 0);
 
+            // --- Monitors section: only when there is more than one to tell apart ---
+            var display = Gdk.Display.get_default();
+            if (display != null && display.get_n_monitors() > 1) {
+                outer.pack_start(make_section_header("Monitors"), false, false, 0);
+                outer.pack_start(create_monitors_card(display), false, false, 0);
+            }
+
             // --- Animations section ---
             outer.pack_start(make_section_header("Animations"), false, false, 0);
 
@@ -454,6 +494,18 @@ namespace Dokku {
             var items_grid = make_card_grid();
             row = 0;
 
+            // Click the active app to minimize it
+            items_grid.attach(make_setting_label("Minimize on click", "Clicking the icon of the focused app minimizes it"), 0, row, 1, 1);
+            var minimize_switch = new Gtk.Switch();
+            minimize_switch.active = config.get_minimize_on_click();
+            minimize_switch.halign = Gtk.Align.START;
+            minimize_switch.valign = Gtk.Align.CENTER;
+            minimize_switch.notify["active"].connect(() => {
+                config.set_minimize_on_click(minimize_switch.active);
+                schedule_apply();
+            });
+            items_grid.attach(minimize_switch, 1, row++, 1, 1);
+
             // Media widget
             items_grid.attach(make_setting_label("Media widget", "Show media player controls on the dock"), 0, row, 1, 1);
             var media_switch = new Gtk.Switch();
@@ -465,6 +517,32 @@ namespace Dokku {
                 schedule_apply();
             });
             items_grid.attach(media_switch, 1, row++, 1, 1);
+
+            // Players the media widget ignores
+            items_grid.attach(make_setting_label("Ignored players",
+                "Media players to skip, separated by commas. Matches part of the player's name"), 0, row, 1, 1);
+            var blocked_entry = new Gtk.Entry();
+            blocked_entry.text = string.joinv(", ", config.get_media_blocked_players());
+            blocked_entry.width_chars = 28;
+            blocked_entry.halign = Gtk.Align.START;
+            blocked_entry.valign = Gtk.Align.CENTER;
+            string saved_blocked = blocked_entry.text;
+            // Saved when the entry is left or Enter is pressed, not on every key
+            SourceFunc commit_blocked = () => {
+                if (blocked_entry.text == saved_blocked) return Source.REMOVE;
+                saved_blocked = blocked_entry.text;
+                string[] players = {};
+                foreach (var part in blocked_entry.text.split(",")) {
+                    var word = part.strip();
+                    if (word != "") players += word;
+                }
+                config.set_media_blocked_players(players);
+                schedule_apply();
+                return Source.REMOVE;
+            };
+            blocked_entry.activate.connect(() => { commit_blocked(); });
+            blocked_entry.focus_out_event.connect(() => { commit_blocked(); return false; });
+            items_grid.attach(blocked_entry, 1, row++, 1, 1);
 
             // Notification badges
             items_grid.attach(make_setting_label("Notification badges", "Show unread count on app icons"), 0, row, 1, 1);
@@ -519,9 +597,11 @@ namespace Dokku {
 
             // User plugins
             foreach (var plugin in plugin_manager.get_user_plugins()) {
-                items_grid.attach(make_setting_label(plugin.name, "User-installed plugin"), 0, row, 1, 1);
+                var script_plugin = plugin as ScriptPlugin;
+                bool on_by_default = script_plugin == null || script_plugin.enabled_by_default;
+                items_grid.attach(make_setting_label(plugin.name, "Plugin"), 0, row, 1, 1);
                 var sw = new Gtk.Switch();
-                sw.active = config.get_plugin_enabled(plugin.id);
+                sw.active = config.get_plugin_enabled(plugin.id, on_by_default);
                 sw.halign = Gtk.Align.START;
                 sw.valign = Gtk.Align.CENTER;
                 var pid = plugin.id;
@@ -576,11 +656,241 @@ namespace Dokku {
             });
             launcher_grid.attach(group_switch, 1, row++, 1, 1);
 
+            // Web search address
+            launcher_grid.attach(make_setting_label("Web search",
+                "Where the launcher's search the web row goes. %s stands for the search words. Empty turns the row off"), 0, row, 1, 1);
+            var web_entry = new Gtk.Entry();
+            web_entry.text = config.get_web_search_url();
+            web_entry.width_chars = 30;
+            web_entry.halign = Gtk.Align.START;
+            web_entry.valign = Gtk.Align.CENTER;
+            string saved_web = web_entry.text;
+            SourceFunc commit_web = () => {
+                string url = web_entry.text.strip();
+                if (url == saved_web) return Source.REMOVE;
+                // Only an empty value or an http(s) address with %s is kept
+                if (url != "" && QuickResults.web_search_uri(url, "x") == null) {
+                    web_entry.text = saved_web;
+                    return Source.REMOVE;
+                }
+                saved_web = url;
+                config.set_web_search_url(url);
+                schedule_apply();
+                return Source.REMOVE;
+            };
+            web_entry.activate.connect(() => { commit_web(); });
+            web_entry.focus_out_event.connect(() => { commit_web(); return false; });
+            launcher_grid.attach(web_entry, 1, row++, 1, 1);
+
             launcher_card.pack_start(launcher_grid, true, true, 0);
             outer.pack_start(launcher_card, false, false, 0);
 
+            // --- Backup section ---
+            outer.pack_start(make_section_header("Backup", false), false, false, 0);
+
+            var backup_card = make_card();
+            var backup_grid = make_card_grid();
+            backup_grid.attach(make_setting_label("Settings file",
+                "Save your settings, pinned apps and folders to a file, or load them back"), 0, 0, 1, 1);
+            var backup_buttons = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            backup_buttons.halign = Gtk.Align.END;
+            backup_buttons.valign = Gtk.Align.CENTER;
+            var export_btn = new Gtk.Button.with_label("Export...");
+            export_btn.clicked.connect(on_export_settings);
+            var import_btn = new Gtk.Button.with_label("Import...");
+            import_btn.clicked.connect(on_import_settings);
+            var reset_btn = new Gtk.Button.with_label("Reset...");
+            reset_btn.get_style_context().add_class("destructive-action");
+            reset_btn.clicked.connect(on_reset_settings);
+            backup_buttons.pack_start(export_btn, false, false, 0);
+            backup_buttons.pack_start(import_btn, false, false, 0);
+            backup_buttons.pack_start(reset_btn, false, false, 0);
+            backup_grid.attach(backup_buttons, 1, 0, 1, 1);
+            backup_card.pack_start(backup_grid, true, true, 0);
+            outer.pack_start(backup_card, false, false, 0);
+
             scroll.add(outer);
             return scroll;
+        }
+
+        // One row per connected monitor: its own edge, icon size and auto-hide, or "Default"
+        // to follow the settings above
+        private Gtk.Widget create_monitors_card(Gdk.Display display) {
+            var card = make_card();
+            var grid = make_card_grid();
+            string[] keys = MonitorKey.all(display);
+            int row = 0;
+
+            var note = new Gtk.Label("<small>Each monitor can have its own edge, icon size and auto-hide. " +
+                                     "Default follows the settings for all monitors. Turn on Show on all monitors " +
+                                     "to get a dock on each one.</small>");
+            note.use_markup = true;
+            note.wrap = true;
+            note.xalign = 0;
+            note.max_width_chars = 70;
+            note.get_style_context().add_class("dim-label");
+            grid.attach(note, 0, row++, 2, 1);
+
+            for (int i = 0; i < keys.length; i++) {
+                string key = keys[i];
+                grid.attach(make_setting_label(MonitorKey.label(display, i), "Settings for this monitor"),
+                            0, row, 1, 1);
+
+                var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+                box.halign = Gtk.Align.END;
+                box.valign = Gtk.Align.CENTER;
+
+                // Edge
+                var edge = new Gtk.ComboBoxText();
+                edge.append("", "Edge: Default");
+                edge.append("bottom", "Bottom");
+                edge.append("top", "Top");
+                edge.append("left", "Left");
+                edge.append("right", "Right");
+                edge.active_id = config.get_monitor_position(key) ?? "";
+                edge.changed.connect(() => {
+                    string id = edge.active_id ?? "";
+                    config.set_monitor_position(key, id == "" ? null : id);
+                    schedule_apply();
+                });
+                box.pack_start(edge, false, false, 0);
+
+                // Icon size: Default follows the setting for all monitors
+                var size = new Gtk.ComboBoxText();
+                size.append("0", "Size: Default");
+                int[] presets = { 24, 32, 40, 48, 56, 64, 80, 96, 128 };
+                int current = config.get_monitor_icon_size(key);
+                bool listed = current == 0;
+                foreach (int preset in presets) {
+                    if (current > 0 && !listed && current < preset) {
+                        size.append(current.to_string(), "%d px".printf(current));
+                        listed = true;
+                    }
+                    if (preset == current) listed = true;
+                    size.append(preset.to_string(), "%d px".printf(preset));
+                }
+                if (!listed) size.append(current.to_string(), "%d px".printf(current));
+                size.active_id = current.to_string();
+                size.changed.connect(() => {
+                    config.set_monitor_icon_size(key, int.parse(size.active_id ?? "0"));
+                    schedule_apply();
+                });
+                box.pack_start(size, false, false, 0);
+
+                // Auto-hide
+                var hide_combo = new Gtk.ComboBoxText();
+                hide_combo.append("-1", "Auto-hide: Default");
+                hide_combo.append("1", "On");
+                hide_combo.append("0", "Off");
+                hide_combo.active_id = config.get_monitor_auto_hide(key).to_string();
+                hide_combo.changed.connect(() => {
+                    config.set_monitor_auto_hide(key, int.parse(hide_combo.active_id ?? "-1"));
+                    schedule_apply();
+                });
+                box.pack_start(hide_combo, false, false, 0);
+
+                grid.attach(box, 1, row++, 1, 1);
+            }
+
+            card.pack_start(grid, true, true, 0);
+            return card;
+        }
+
+        // --- Export, import and reset ---
+
+        private void tell(Gtk.MessageType type, string text, string? detail = null) {
+            var box = new Gtk.MessageDialog(this, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                                            type, Gtk.ButtonsType.OK, "%s", text);
+            if (detail != null) box.secondary_text = detail;
+            box.run();
+            box.destroy();
+        }
+
+        private bool confirm(string text, string detail, string action, bool destructive) {
+            var box = new Gtk.MessageDialog(this, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                                            Gtk.MessageType.QUESTION, Gtk.ButtonsType.NONE, "%s", text);
+            box.secondary_text = detail;
+            box.add_button("_Cancel", Gtk.ResponseType.CANCEL);
+            var go = box.add_button(action, Gtk.ResponseType.ACCEPT);
+            if (destructive) {
+                // Enter must not be able to throw settings away
+                go.get_style_context().add_class("destructive-action");
+                box.set_default_response(Gtk.ResponseType.CANCEL);
+            } else {
+                box.set_default_response(Gtk.ResponseType.ACCEPT);
+            }
+            bool accepted = box.run() == Gtk.ResponseType.ACCEPT;
+            box.destroy();
+            return accepted;
+        }
+
+        private void on_export_settings() {
+            var dialog = new Gtk.FileChooserDialog(
+                "Export Settings", this, Gtk.FileChooserAction.SAVE,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_Save", Gtk.ResponseType.ACCEPT
+            );
+            dialog.do_overwrite_confirmation = true;
+            dialog.set_current_name("dokku-settings.ini");
+            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
+                string path = dialog.get_filename();
+                dialog.destroy();
+                try {
+                    config.export_to(path);
+                    tell(Gtk.MessageType.INFO, "Settings exported", path);
+                } catch (Error e) {
+                    tell(Gtk.MessageType.ERROR, "Could not save the settings", e.message);
+                }
+                return;
+            }
+            dialog.destroy();
+        }
+
+        private void on_import_settings() {
+            var dialog = new Gtk.FileChooserDialog(
+                "Import Settings", this, Gtk.FileChooserAction.OPEN,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_Open", Gtk.ResponseType.ACCEPT
+            );
+            var filter = new Gtk.FileFilter();
+            filter.set_filter_name("Settings files (*.ini)");
+            filter.add_pattern("*.ini");
+            dialog.add_filter(filter);
+            if (dialog.run() != Gtk.ResponseType.ACCEPT) {
+                dialog.destroy();
+                return;
+            }
+            string path = dialog.get_filename();
+            dialog.destroy();
+
+            if (!confirm("Replace your settings with this file?",
+                         "A copy of your current settings is kept as config.ini.bak. " +
+                         "Only import files you trust: settings can include launcher shortcuts that run commands.",
+                         "_Import", false)) {
+                return;
+            }
+            try {
+                config.import_from(path);
+            } catch (Error e) {
+                tell(Gtk.MessageType.ERROR, "Could not import the settings", e.message);
+                return;
+            }
+            settings_changed();
+            rebuild_ui();
+            tell(Gtk.MessageType.INFO, "Settings imported");
+        }
+
+        private void on_reset_settings() {
+            if (!confirm("Reset all settings to the defaults?",
+                         "Pinned apps, folders, shortcuts and other settings go back to how a fresh install starts. " +
+                         "A copy of your current settings is kept as config.ini.bak.",
+                         "_Reset", true)) {
+                return;
+            }
+            config.reset_to_defaults();
+            settings_changed();
+            rebuild_ui();
+            tell(Gtk.MessageType.INFO, "Settings reset to the defaults");
         }
 
         private void on_install_plugin() {

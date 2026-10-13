@@ -153,11 +153,14 @@ namespace Dokku {
                        Gdk.EventMask.LEAVE_NOTIFY_MASK |
                        Gdk.EventMask.ENTER_NOTIFY_MASK |
                        Gdk.EventMask.BUTTON_PRESS_MASK |
-                       Gdk.EventMask.BUTTON_RELEASE_MASK);
+                       Gdk.EventMask.BUTTON_RELEASE_MASK |
+                       Gdk.EventMask.SCROLL_MASK |
+                       Gdk.EventMask.SMOOTH_SCROLL_MASK);
 
             // Enable drag-and-drop for .desktop files (no HIGHLIGHT — we draw our own indicator)
-            Gtk.drag_dest_set(this, Gtk.DestDefaults.DROP, DROP_TARGETS, Gdk.DragAction.COPY);
+            Gtk.drag_dest_set(this, 0, DROP_TARGETS, Gdk.DragAction.COPY);
             drag_data_received.connect(on_drag_data_received);
+            drag_drop.connect(on_drag_drop);
             drag_motion.connect(on_drag_motion);
             drag_leave.connect(on_drag_leave);
 
@@ -220,6 +223,7 @@ namespace Dokku {
             button_press_event.connect(on_button_press);
             key_press_event.connect(on_key_press);
             button_release_event.connect(on_button_release);
+            scroll_event.connect(on_scroll);
 
             this.destroy.connect(() => {
                 // Pointer grab
@@ -247,11 +251,8 @@ namespace Dokku {
                 blur_backdrop.shutdown();
             });
 
-            auto_hide = config.get_auto_hide();
             dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
-            dock_position = config.get_position();
-            is_vertical = (dock_position == "left" || dock_position == "right");
-            renderer.icon_size = config.get_icon_size();
+            apply_monitor_settings();
             renderer.magnification = config.get_magnification();
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();
@@ -279,6 +280,27 @@ namespace Dokku {
             } else {
                 position_dock();
             }
+            // This monitor may have settings of its own (another edge, another icon size)
+            string key = MonitorKey.for_monitor(Gdk.Display.get_default(), monitor);
+            if (key != monitor_key
+                || config.get_position_for(key) != dock_position
+                || config.get_icon_size_for(key) != renderer.icon_size
+                || config.get_auto_hide_for(key) != auto_hide) {
+                reload_settings();
+            }
+        }
+
+        // The name of the monitor this dock is on, for the settings kept per monitor
+        private string monitor_key = "";
+
+        // Position, icon size and auto-hide: the monitor's own setting where it has one,
+        // otherwise the one for all monitors
+        private void apply_monitor_settings() {
+            monitor_key = MonitorKey.for_monitor(Gdk.Display.get_default(), get_dock_monitor());
+            dock_position = config.get_position_for(monitor_key);
+            is_vertical = (dock_position == "left" || dock_position == "right");
+            renderer.icon_size = config.get_icon_size_for(monitor_key);
+            auto_hide = config.get_auto_hide_for(monitor_key);
         }
 
         public Gdk.Monitor? get_target_monitor_ref() {
@@ -314,7 +336,12 @@ namespace Dokku {
         // next commit, which would otherwise wait for the dock to redraw. Force one.
         private void set_layer_shell_keyboard_mode(GtkLayerShell.KeyboardMode mode) {
             GtkLayerShell.set_keyboard_mode(this, mode);
+#if HAVE_LAYER_SHELL_FORCE_COMMIT
             GtkLayerShell.try_force_commit(this);
+#else
+            // gtk-layer-shell before 0.9 cannot force a commit; a redraw makes GTK send one
+            queue_draw();
+#endif
         }
 
         private void apply_layer_shell_anchors() {
@@ -369,12 +396,14 @@ namespace Dokku {
 
             // User script widget plugins
             foreach (var up in plugin_manager.get_user_plugins()) {
-                if (!config.get_plugin_enabled(up.id)) continue;
                 var sp = up as ScriptPlugin;
-                if (sp != null && sp.is_widget) {
-                    items.append(new DockItem.from_plugin(sp));
-                    if (wire_once(sp)) sp.updated.connect(() => schedule_redraw());
-                }
+                if (sp == null || !sp.is_widget) continue;
+                if (wire_once(sp)) sp.updated.connect(() => on_widget_plugin_updated(sp));
+                if (!config.get_plugin_enabled(up.id, sp.enabled_by_default)) continue;
+                if (!sp.visible_in_dock) continue;
+                var widget_item = new DockItem.from_plugin(sp);
+                widget_item.name = sp.tooltip;
+                items.append(widget_item);
             }
 
             if (config.get_plugin_enabled("show-desktop")
@@ -387,6 +416,17 @@ namespace Dokku {
                 if (trash != null) {
                     items.append(new DockItem.from_plugin(trash));
                     if (wire_once(trash)) {
+                        trash.trash_finished.connect((ok, count) => {
+                            if (ok) return;
+                            int trash_index = 0;
+                            foreach (var item in items) {
+                                if (item.plugin == trash) {
+                                    preview.flash(trash_index, "Couldn't move to the Trash", 2200);
+                                    break;
+                                }
+                                trash_index++;
+                            }
+                        });
                         trash.changed.connect(() => {
                             renderer.clear_icon_cache("user-trash");
                             renderer.clear_icon_cache("user-trash-full");
@@ -395,6 +435,33 @@ namespace Dokku {
                     }
                 }
             }
+        }
+
+        private uint widget_reload_id = 0;
+
+        // A widget plugin has new text. Its tooltip follows, and a widget that appeared or
+        // went away (a battery widget when a battery is plugged in) changes what the dock holds.
+        private void on_widget_plugin_updated(ScriptPlugin sp) {
+            bool shown = false;
+            int index = 0;
+            foreach (var item in items) {
+                if (item.plugin == sp) {
+                    shown = true;
+                    item.name = sp.tooltip;
+                    // A tooltip already open over the widget follows its new text
+                    preview.update_tooltip_text(index, sp.tooltip);
+                }
+                index++;
+            }
+            bool wanted = config.get_plugin_enabled(sp.id, sp.enabled_by_default) && sp.visible_in_dock;
+            if (wanted != shown && widget_reload_id == 0) {
+                widget_reload_id = Idle.add(() => {
+                    widget_reload_id = 0;
+                    reload_settings();
+                    return Source.REMOVE;
+                });
+            }
+            schedule_redraw();
         }
 
         private void update_media_widget(MediaPlugin media) {
@@ -1382,9 +1449,104 @@ namespace Dokku {
             return true;
         }
 
+        // What the drag in progress carries, found while it is still over the dock
+        private Gdk.DragContext? peek_context = null;
+        private bool peek_ready = false;
+        private bool peek_has_files = false;
+        private bool peek_any = false;
+        private bool dropping = false;
+        // App the pointer is over while dragging files, or -1
+        private int drop_open_index = -1;
+
+        private static bool is_desktop_uri(string uri) {
+            return uri.has_suffix(".desktop");
+        }
+
+        // An item that stands for an application a file can be opened with
+        private bool can_open_files_with(DockItem item) {
+            if (item.is_launcher || item.is_folder || item.is_separator || item.is_plugin) return false;
+            var app = app_manager.get_app(item.id);
+            return app != null && app.can_open_files();
+        }
+
+        private bool on_drag_drop(Gdk.DragContext context, int x, int y, uint time) {
+            // Ask for the data again; the answer arrives in on_drag_data_received
+            dropping = true;
+            Gtk.drag_get_data(this, context, Gdk.Atom.intern("text/uri-list", false), time);
+            return true;
+        }
+
+        private void clear_file_drop_state() {
+            peek_context = null;
+            peek_ready = false;
+            peek_has_files = false;
+            peek_any = false;
+            if (drop_open_index >= 0) {
+                drop_open_index = -1;
+                hovering = false;
+                mouse_x = -1;
+                mouse_y = -1;
+                hovered_index = -1;
+                schedule_redraw();
+            }
+        }
+
         private void on_drag_data_received(Gdk.DragContext context, int x, int y,
                                            Gtk.SelectionData data, uint info, uint time) {
             var uris = data.get_uris();
+
+            if (!dropping) {
+                // The look at the drag that on_drag_motion asked for
+                peek_has_files = false;
+                peek_any = uris.length > 0;
+                foreach (var uri in uris) {
+                    if (!is_desktop_uri(uri)) { peek_has_files = true; break; }
+                }
+                peek_ready = true;
+                return;
+            }
+            dropping = false;
+
+            // Anything dropped on the Trash goes into it
+            int over_drop = get_item_at(is_vertical ? (double) y : (double) x);
+            var over_drop_item = over_drop >= 0 ? items.nth_data(over_drop) : null;
+            if (over_drop_item != null && over_drop_item.plugin is TrashPlugin && uris.length > 0) {
+                var trash_plugin = (TrashPlugin) over_drop_item.plugin;
+                int sent = trash_plugin.trash_uris(uris);
+                if (sent == 0) preview.flash(over_drop, "That can't be moved to the Trash", 1800);
+                clear_file_drop_state();
+                drop_insert_index = -1;
+                position_dock();
+                schedule_redraw();
+                Gtk.drag_finish(context, sent > 0, false, time);
+                return;
+            }
+
+            // Files dropped on an app open in it
+            var files = new List<string>();
+            foreach (var uri in uris) {
+                if (!is_desktop_uri(uri)) files.append(uri);
+            }
+            if (files.length() > 0) {
+                int target = get_item_at(is_vertical ? (double) y : (double) x);
+                var target_item = target >= 0 ? items.nth_data(target) : null;
+                bool opened = false;
+                if (target_item != null && can_open_files_with(target_item)) {
+                    var app = app_manager.get_app(target_item.id);
+                    opened = app.open_files(files);
+                    if (opened) {
+                        usage_tracker.record_launch(target_item.id);
+                        trigger_bounce(target_item.id, true);
+                    }
+                }
+                clear_file_drop_state();
+                drop_insert_index = -1;
+                position_dock();
+                schedule_redraw();
+                Gtk.drag_finish(context, opened, false, time);
+                return;
+            }
+
             int insert_at = drop_insert_index >= 0 ? drop_insert_index : find_separator_index();
 
             foreach (var uri in uris) {
@@ -1424,6 +1586,67 @@ namespace Dokku {
         }
 
         private bool on_drag_motion(Gdk.DragContext context, int x, int y, uint time) {
+            if (peek_context != context) {
+                peek_context = context;
+                peek_ready = false;
+                peek_has_files = false;
+                Gtk.drag_get_data(this, context, Gdk.Atom.intern("text/uri-list", false), time);
+            }
+
+            // The Trash takes anything: it is the target, whatever is being dragged
+            if (peek_ready && peek_any) {
+                int hover = get_item_at(is_vertical ? (double) y : (double) x);
+                var hover_item = hover >= 0 ? items.nth_data(hover) : null;
+                if (hover_item != null && hover_item.plugin is TrashPlugin) {
+                    if (drop_insert_index >= 0) {
+                        drop_insert_index = -1;
+                        position_dock();
+                    }
+                    Gdk.drag_status(context, Gdk.DragAction.COPY, time);
+                    drop_open_index = hover;
+                    hovering = true;
+                    mouse_x = x;
+                    mouse_y = y;
+                    hovered_index = hover;
+                    schedule_redraw();
+                    return true;
+                }
+            }
+
+            // Files, not .desktop entries: the icon under the pointer is the target
+            if (peek_ready && peek_has_files) {
+                if (drop_insert_index >= 0) {
+                    drop_insert_index = -1;
+                    position_dock();
+                }
+                int over = get_item_at(is_vertical ? (double) y : (double) x);
+                var over_item = over >= 0 ? items.nth_data(over) : null;
+                if (over_item != null && can_open_files_with(over_item)) {
+                    Gdk.drag_status(context, Gdk.DragAction.COPY, time);
+                    drop_open_index = over;
+                    // The hover magnification marks the target
+                    hovering = true;
+                    mouse_x = x;
+                    mouse_y = y;
+                    hovered_index = over;
+                } else {
+                    Gdk.drag_status(context, 0, time);
+                    if (drop_open_index >= 0) {
+                        drop_open_index = -1;
+                        mouse_x = -1;
+                        mouse_y = -1;
+                        hovered_index = -1;
+                    }
+                }
+                schedule_redraw();
+                return true;
+            }
+            // Nothing known yet: don't open a gap until we know what is being dragged
+            if (!peek_ready) {
+                Gdk.drag_status(context, Gdk.DragAction.COPY, time);
+                return true;
+            }
+
             Gdk.drag_status(context, Gdk.DragAction.COPY, time);
             int new_index = get_drop_index(is_vertical ? (double)y : (double)x);
             if (new_index != drop_insert_index) {
@@ -1435,6 +1658,7 @@ namespace Dokku {
         }
 
         private void on_drag_leave(Gdk.DragContext context, uint time) {
+            clear_file_drop_state();
             if (drop_insert_index >= 0) {
                 drop_insert_index = -1;
                 position_dock();
@@ -1535,6 +1759,13 @@ namespace Dokku {
             return false;
         }
 
+        // Item a middle-button press started on, or -1
+        private int middle_index = -1;
+        // Scroll steps collected toward one window switch, and when the last switch happened
+        private double scroll_accum = 0;
+        private int64 last_scroll_step_us = 0;
+        private const int64 SCROLL_STEP_GAP_US = 150000;
+
         private bool on_button_press(Gdk.EventButton event) {
             if (is_reordering) return true;  // Ignore during active drag
             double main_coord = is_vertical ? event.y : event.x;
@@ -1547,10 +1778,113 @@ namespace Dokku {
             if (event.button == 1) {
                 drag_start_x = main_coord;
                 drag_index = get_item_at(main_coord);
+            } else if (event.button == 2) {
+                middle_index = get_item_at(main_coord);
             } else if (event.button == 3) {
                 show_context_menu(event);
             }
             return true;
+        }
+
+        // Middle click: play or pause on the media widget, a new window on an app
+        private void middle_activate_item(int index) {
+            var item = items.nth_data(index);
+            if (item == null) return;
+            if (item.is_media_widget && item.plugin is MediaPlugin) {
+                ((MediaPlugin) item.plugin).activate();
+                return;
+            }
+            if (item.is_launcher || item.is_folder || item.is_separator || item.is_plugin) return;
+            launch_new_window(item);
+        }
+
+        private void launch_new_window(DockItem item) {
+            var app = app_manager.get_app(item.id);
+            if (app == null) return;
+            usage_tracker.record_launch(item.id);
+            app.launch();
+            trigger_bounce(item.id, true);
+        }
+
+        // The scroll wheel: volume on the media widget, window switching on an app
+        // Timestamp of the last scroll event acted on. A mouse wheel notch can arrive twice
+        // with one timestamp, as a discrete step and as a smooth one (it does on Wayland),
+        // and it must count once.
+        private uint32 last_scroll_time = 0;
+
+        private bool on_scroll(Gdk.EventScroll event) {
+            if (event.time != 0 && event.time == last_scroll_time) return true;
+            last_scroll_time = event.time;
+            if (is_reordering) return true;
+            double main_coord = is_vertical ? event.y : event.x;
+            int index = get_item_at(main_coord);
+            if (index < 0) return false;
+            var item = items.nth_data(index);
+            if (item == null) return false;
+
+            // Steps down (positive) or up (negative)
+            double steps = 0;
+            bool smooth = false;
+            switch (event.direction) {
+                case Gdk.ScrollDirection.UP: case Gdk.ScrollDirection.LEFT: steps = -1; break;
+                case Gdk.ScrollDirection.DOWN: case Gdk.ScrollDirection.RIGHT: steps = 1; break;
+                case Gdk.ScrollDirection.SMOOTH:
+                    steps = event.delta_y != 0 ? event.delta_y : event.delta_x;
+                    smooth = true;
+                    break;
+                default: return false;
+            }
+            if (steps == 0) return true;
+
+            if (item.is_media_widget && item.plugin is MediaPlugin) {
+                // Scrolling up raises the volume
+                double v = ((MediaPlugin) item.plugin).change_volume(-steps * (smooth ? 0.03 : 0.05));
+                if (v >= 0) preview.flash(index, "Volume %d%%".printf((int) Math.round(v * 100)));
+                return true;
+            }
+
+            // A widget plugin with scroll commands, such as a volume control
+            var script_plugin = item.plugin as ScriptPlugin;
+            if (script_plugin != null && script_plugin.has_scroll) {
+                script_plugin.scroll(steps < 0);
+                return true;
+            }
+
+            if (item.is_launcher || item.is_folder || item.is_separator || item.is_plugin) return false;
+            if (!item.running || item.windows.length() < 2) return false;
+
+            scroll_accum += steps;
+            if (Math.fabs(scroll_accum) < 1.0) return true;
+            int64 now = GLib.get_monotonic_time();
+            int dir = scroll_accum > 0 ? 1 : -1;
+            scroll_accum = 0;
+            if (now - last_scroll_step_us < SCROLL_STEP_GAP_US) return true;
+            last_scroll_step_us = now;
+            cycle_windows(item, index, dir);
+            return true;
+        }
+
+        // Brings the next (dir 1) or previous (dir -1) window of an app to the front
+        private void cycle_windows(DockItem item, int index, int dir) {
+            int count = (int) item.windows.length();
+            var active = wm.get_active_window();
+            int current = -1;
+            for (int i = 0; i < count; i++) {
+                if (item.windows.nth_data(i) == active) { current = i; break; }
+            }
+            int next = current < 0 ? (dir > 0 ? 0 : count - 1) : ((current + dir) % count + count) % count;
+            var window = item.windows.nth_data(next);
+            if (window == null) return;
+            wm.activate_window(window);
+            preview.flash(index, TextUtil.sanitize(window.title), 900);
+        }
+
+        // Whether the app's window is the one with focus
+        private bool is_app_active(DockItem item) {
+            var active = wm.get_active_window();
+            if (active == null) return false;
+            var app = app_manager.find_by_window(active);
+            return app != null && app.id == item.id;
         }
 
         private bool on_button_release(Gdk.EventButton event) {
@@ -1561,6 +1895,10 @@ namespace Dokku {
             }
 
             double main_coord = is_vertical ? event.y : event.x;
+            if (event.button == 2 && middle_index >= 0) {
+                if (get_item_at(main_coord) == middle_index) middle_activate_item(middle_index);
+                middle_index = -1;
+            }
             if (event.button == 1 && drag_index >= 0) {
                 if (is_reordering && drag_removing) {
                     // Drag-to-remove: unpin and animate poof
@@ -1706,7 +2044,12 @@ namespace Dokku {
             if (item.is_plugin && item.plugin != null) { item.plugin.activate(); return; }
             if (item.running && item.windows.length() > 1) { show_window_list(item); return; }
             if (item.running && item.windows.length() > 0) {
-                wm.activate_window(item.windows.nth_data(0));
+                var window = item.windows.nth_data(0);
+                if (config.get_minimize_on_click() && !window.is_minimized && is_app_active(item)) {
+                    window.minimize();
+                } else {
+                    wm.activate_window(window);
+                }
             } else {
                 var app = app_manager.get_app(item.id);
                 if (app != null) {
@@ -1807,7 +2150,7 @@ namespace Dokku {
 
             if (item.running) {
                 var nw = new Gtk.MenuItem.with_label("New Window");
-                nw.activate.connect(() => { var a = app_manager.get_app(item.id); if (a != null) { usage_tracker.record_launch(item.id); a.launch(); trigger_bounce(item.id, true); } });
+                nw.activate.connect(() => launch_new_window(item));
                 context_menu.append(nw);
             }
 
@@ -1912,11 +2255,12 @@ namespace Dokku {
 
         public void reload_settings() {
             config.reload();
-            dock_position = config.get_position();
-            is_vertical = (dock_position == "left" || dock_position == "right");
-            renderer.icon_size = config.get_icon_size();
+            var media_plugin = plugin_manager.get_plugin("media-player") as MediaPlugin;
+            if (media_plugin != null) {
+                media_plugin.set_blocked_players(config.get_media_blocked_players());
+            }
+            apply_monitor_settings();
             renderer.magnification = config.get_magnification();
-            auto_hide = config.get_auto_hide();
             dodge_windows = config.get_dodge_windows() && Capabilities.current.supports(Feature.DODGE_WINDOWS);
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();

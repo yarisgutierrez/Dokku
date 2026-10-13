@@ -54,6 +54,179 @@ namespace Dokku {
             }
         }
 
+        // --- Per-monitor settings ---
+        //
+        // A monitor can override the position, the icon size and auto-hide. A setting
+        // that is not overridden follows the one for all monitors. Monitors are named by
+        // MonitorKey and kept in a [Monitor:<name>] section.
+
+        private static string monitor_group(string key) {
+            return "Monitor:" + key;
+        }
+
+        private static bool valid_position(string position) {
+            return position == "bottom" || position == "top" || position == "left" || position == "right";
+        }
+
+        // null when this monitor has no override
+        public string? get_monitor_position(string key) {
+            try {
+                string value = keyfile.get_string(monitor_group(key), "position");
+                return valid_position(value) ? value : null;
+            } catch (Error e) {
+                return null;
+            }
+        }
+
+        // 0 when this monitor has no override
+        public int get_monitor_icon_size(string key) {
+            try { return keyfile.get_integer(monitor_group(key), "icon_size").clamp(16, 128); }
+            catch (Error e) { return 0; }
+        }
+
+        // -1 when this monitor has no override, otherwise 0 (off) or 1 (on)
+        public int get_monitor_auto_hide(string key) {
+            try { return keyfile.get_boolean(monitor_group(key), "auto_hide") ? 1 : 0; }
+            catch (Error e) { return -1; }
+        }
+
+        // null clears the override
+        public void set_monitor_position(string key, string? position) {
+            set_monitor_value(key, "position", position != null && valid_position(position) ? position : null);
+        }
+
+        // 0 clears the override
+        public void set_monitor_icon_size(string key, int size) {
+            set_monitor_value(key, "icon_size", size > 0 ? size.clamp(16, 128).to_string() : null);
+        }
+
+        // -1 clears the override
+        public void set_monitor_auto_hide(string key, int state) {
+            set_monitor_value(key, "auto_hide", state < 0 ? null : (state > 0 ? "true" : "false"));
+        }
+
+        private void set_monitor_value(string key, string name, string? value) {
+            if (key == "") return;
+            string group = monitor_group(key);
+            if (value == null) {
+                try {
+                    if (keyfile.has_group(group) && keyfile.has_key(group, name)) {
+                        keyfile.remove_key(group, name);
+                        // An empty section is just clutter
+                        if (keyfile.get_keys(group).length == 0) keyfile.remove_group(group);
+                    }
+                } catch (Error e) {}
+            } else {
+                keyfile.set_value(group, name, value);
+            }
+            save();
+        }
+
+        // What a dock on this monitor uses: the override, or the setting for all monitors
+        public string get_position_for(string monitor_key) {
+            return get_monitor_position(monitor_key) ?? get_position();
+        }
+
+        public int get_icon_size_for(string monitor_key) {
+            int size = get_monitor_icon_size(monitor_key);
+            return size > 0 ? size : get_icon_size();
+        }
+
+        public bool get_auto_hide_for(string monitor_key) {
+            int state = get_monitor_auto_hide(monitor_key);
+            return state < 0 ? get_auto_hide() : state > 0;
+        }
+
+        // --- Backup, restore and reset ---
+
+        private const int64 MAX_IMPORT_BYTES = 1048576;
+
+        private static bool is_known_group(string group) {
+            switch (group) {
+                case "Dock": case "Launcher": case "Plugins": case "Icons": case "Usage":
+                case "Media": case "Hotkeys": case "Folders": case "Shortcuts":
+                    return true;
+                default:
+                    return group.has_prefix("Folder_") || group.has_prefix("Shortcut_") ||
+                           group.has_prefix("Monitor:");
+            }
+        }
+
+        // Writes the current settings to a file of the user's choosing
+        public void export_to(string path) throws Error {
+            FileUtils.set_contents(path, keyfile.to_data());
+        }
+
+        // Replaces the settings with those in a file. The file must be small, parse as
+        // settings and hold only sections Dokku knows, so a wrong file is refused before
+        // anything changes. The settings being replaced are kept as config.ini.bak.
+        public void import_from(string path) throws Error {
+            var info = File.new_for_path(path).query_info("standard::size", FileQueryInfoFlags.NONE);
+            if (info.get_size() > MAX_IMPORT_BYTES) {
+                throw new KeyFileError.PARSE("That file is too large to be Dokku settings.");
+            }
+            var incoming = new KeyFile();
+            incoming.load_from_file(path, KeyFileFlags.NONE);
+
+            string[] groups = incoming.get_groups();
+            if (groups.length == 0) {
+                throw new KeyFileError.GROUP_NOT_FOUND("That file has no settings in it.");
+            }
+            foreach (var group in groups) {
+                if (!is_known_group(group)) {
+                    throw new KeyFileError.GROUP_NOT_FOUND("That is not a Dokku settings file (section [%s]).".printf(group));
+                }
+            }
+            // A value of the wrong kind would only fail later; catch it now
+            Dokku.ConfigManager.check_values(incoming);
+
+            keep_backup();
+            keyfile = incoming;
+            save();
+        }
+
+        // Starts over with the defaults. The old settings are kept as config.ini.bak.
+        public void reset_to_defaults() {
+            keep_backup();
+            keyfile = new KeyFile();
+            save();
+        }
+
+        private void keep_backup() {
+            if (!FileUtils.test(config_file, FileTest.EXISTS)) return;
+            try {
+                File.new_for_path(config_file).copy(File.new_for_path(config_file + ".bak"),
+                                                    FileCopyFlags.OVERWRITE);
+                Posix.chmod(config_file + ".bak", 0600);
+            } catch (Error e) {
+                warning("Could not keep a backup of the settings: %s", e.message);
+            }
+        }
+
+        // Reads the settings that must be a particular kind of value, and throws when one is not
+        private static void check_values(KeyFile k) throws Error {
+            string[,] bools = {
+                {"Dock", "auto_hide"}, {"Dock", "media_widget"}, {"Dock", "minimize_on_click"},
+                {"Dock", "notification_badges"}, {"Dock", "launch_bounce"}, {"Launcher", "fade_effect"}
+            };
+            for (int i = 0; i < bools.length[0]; i++) {
+                if (k.has_group(bools[i, 0]) && k.has_key(bools[i, 0], bools[i, 1])) k.get_boolean(bools[i, 0], bools[i, 1]);
+            }
+            string[,] numbers = { {"Dock", "icon_size"}, {"Dock", "hide_delay"} };
+            for (int i = 0; i < numbers.length[0]; i++) {
+                if (k.has_group(numbers[i, 0]) && k.has_key(numbers[i, 0], numbers[i, 1])) k.get_integer(numbers[i, 0], numbers[i, 1]);
+            }
+            foreach (var group in k.get_groups()) {
+                if (!group.has_prefix("Monitor:")) continue;
+                if (k.has_key(group, "icon_size")) k.get_integer(group, "icon_size");
+                if (k.has_key(group, "auto_hide")) k.get_boolean(group, "auto_hide");
+            }
+            string[,] fractions = { {"Dock", "magnification"}, {"Dock", "dock_opacity"} };
+            for (int i = 0; i < fractions.length[0]; i++) {
+                if (k.has_group(fractions[i, 0]) && k.has_key(fractions[i, 0], fractions[i, 1])) k.get_double(fractions[i, 0], fractions[i, 1]);
+            }
+        }
+
         private bool is_valid_id(string id) {
             if (id.length == 0 || id.length > 64) return false;
             for (int i = 0; i < id.length; i++) {
@@ -216,11 +389,33 @@ namespace Dokku {
             save();
         }
 
-        public bool get_plugin_enabled(string plugin_id) {
+        // Clicking the icon of the app that has focus minimizes it
+        public bool get_minimize_on_click() {
+            try { return keyfile.get_boolean("Dock", "minimize_on_click"); }
+            catch (Error e) { return true; }
+        }
+
+        public void set_minimize_on_click(bool enabled) {
+            keyfile.set_boolean("Dock", "minimize_on_click", enabled);
+            save();
+        }
+
+        // Players the media widget ignores, matched against the MPRIS bus name
+        public string[] get_media_blocked_players() {
+            try { return keyfile.get_string_list("Media", "blocked_players"); }
+            catch (Error e) { return MediaPlayerPicker.DEFAULT_BLOCKED; }
+        }
+
+        public void set_media_blocked_players(string[] players) {
+            keyfile.set_string_list("Media", "blocked_players", players);
+            save();
+        }
+
+        public bool get_plugin_enabled(string plugin_id, bool default_value = true) {
             try {
                 return keyfile.get_boolean("Plugins", plugin_id);
             } catch (Error e) {
-                return true; // Default enabled
+                return default_value;
             }
         }
 
@@ -228,6 +423,18 @@ namespace Dokku {
             keyfile.set_boolean("Plugins", plugin_id, enabled);
             save();
         }
+        // Where the launcher's "search the web" row goes; %s stands for the words.
+        // Empty turns the row off.
+        public string get_web_search_url() {
+            try { return keyfile.get_string("Launcher", "web_search_url"); }
+            catch (Error e) { return QuickResults.DEFAULT_WEB_SEARCH; }
+        }
+
+        public void set_web_search_url(string url) {
+            keyfile.set_string("Launcher", "web_search_url", url);
+            save();
+        }
+
         public bool get_launcher_fade() {
             try { return keyfile.get_boolean("Launcher", "fade_effect"); }
             catch (Error e) { return true; }

@@ -6,7 +6,56 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-13
+
 ### Added
+- **`DOKKU_TIMING=1`** logs the launcher's open and fade timings to the terminal, for
+  tracking down lag. It does nothing unless set.
+- **Drag files onto the Trash.** Dropping files or folders on the Trash icon moves them to the
+  Trash (through `gio trash`, so Restore and Undo in the file manager work). The icon enlarges
+  as the drop target, turns "full" afterwards, and a message explains when something can't be
+  trashed. The home folder and everything above it, the Trash itself, and files that a
+  `file://` address places on another machine are refused.
+- **Per-monitor dock settings.** With more than one monitor, Settings, Behavior, Monitors lists
+  each one with its own edge, icon size and auto-hide; "Default" follows the settings for all
+  monitors. They are kept in `[Monitor:<make> <model> <size>]` sections of `config.ini`
+  (identical monitors are numbered `#1`, `#2` from left to right). Turn on Show on all
+  monitors to get a dock on each one.
+- **Clock, Battery and Volume widgets.** Three plugins ship with Dokku and start switched off;
+  enable them under Settings, Behavior. The clock shows the time with the date as its tooltip,
+  the battery shows the charge (and hides itself on a machine without one), and the volume
+  widget shows the output level, mutes on click and changes the volume on scroll (PipeWire's
+  `wpctl`, or `pactl`).
+- **Widget plugins can scroll, explain themselves and hide.** In `plugin.ini`: `scroll_up` and
+  `scroll_down` commands, `tooltip_format` for clocks, `hide_when_empty`, and
+  `default_enabled`. A script's first line goes on the icon and the lines after it become the
+  tooltip. A widget refreshes as soon as its click or scroll command finishes. Plugins that
+  ship with Dokku are read from `/usr/share/dokku/plugins`; one of yours with the same id wins.
+- **`.deb` packages and CI.** `packaging/build-deb.sh` builds a package, a GitHub Actions
+  workflow builds it on every push, and pushing a `v*` tag publishes a release with it.
+- **Back up and restore your settings.** Settings, Behavior, Backup has Export (save
+  `config.ini` to a file), Import (load one back) and Reset (back to the defaults). Import
+  refuses a file that is too large, not settings, or has a value of the wrong kind, and
+  changes nothing when it does. Import and Reset keep what they replace as `config.ini.bak`.
+- **Launcher quick results.** Typing a calculation such as `2+3*4` or `sqrt(16)+1` shows the
+  answer, and Enter (or a click) copies it. Matching recent files appear as rows you can open.
+  When nothing in the grid matches, a "Search the web" row opens the words in your browser.
+  The address is set under Settings, Behavior, Web search (`[Launcher] web_search_url`, with
+  `%s` for the search words); leave it empty to turn the row off. Nothing is sent anywhere
+  until you choose the row.
+- **Dock icon interactions.** Middle-click an app icon to open a new window. Scroll over an app
+  with several windows to switch between them (scroll down for the next, up for the previous).
+  Click the icon of the focused app to minimize it; Settings, Behavior, Minimize on click turns
+  that off. On the media widget, scroll changes the volume (a short "Volume 60%" label shows
+  it) and middle-click plays or pauses.
+- **Drop files on an app icon to open them with it.** Dragging a file over an app that takes
+  files enlarges its icon; dropping opens the file in that app. Dragging a file over the
+  dock no longer opens a pin gap, which is now only for `.desktop` files.
+- **The media widget follows the player that is playing.** With several MPRIS players open, a
+  player that is playing wins over the fixed priority list, and the widget stays with it until
+  another player starts. Pausing does not hand the widget to a different player.
+- **Ignored players setting.** Settings, Behavior, Ignored players (or `[Media] blocked_players`
+  in `config.ini`) lists the players the media widget skips. It takes effect without a restart.
 - **Now-playing popup with a seek bar.** Resting the pointer on the media widget for 0.6 s, or clicking
   its art or text, opens a card with the album art, song, artist, album, the player's logo,
   elapsed and total time, a seek bar you can click or drag, and previous, play/pause and next.
@@ -59,6 +108,24 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **Dokku did not build against gtk-layer-shell older than 0.9**, which includes Ubuntu 24.04
+  (it ships 0.8). It uses `gtk_layer_try_force_commit` where the library has it and asks GTK
+  to redraw the dock where it does not. Found by the new CI.
+- **Messages over the dock vanished almost at once.** Hover handling dismissed them as soon as the
+  pointer moved. A message now stays for its full time.
+- **The Trash icon stayed "empty" after the first file was trashed** when the Trash folder
+  did not exist yet when Dokku started. The folder is created at startup.
+- **A wheel notch counted twice on Wayland.** Wayland delivers each notch as a discrete and a
+  smooth scroll event with the same timestamp, so the volume widget moved about twice as far as
+  intended. A repeat with the same timestamp is now ignored.
+- **`Reload` over D-Bus only reloaded the main dock.** It now does what changing a setting does:
+  every dock (one per monitor), the launcher and the hotkeys pick up the new settings.
+- **Launcher fade-out stuttered under picom.** The fade repainted the whole fullscreen window
+  every frame, which picom's GL backend could not keep up with. On X11 the launcher now fades
+  through `_NET_WM_WINDOW_OPACITY` and the compositor does the blending. It is also tagged
+  `_DOKKU_WINDOW`, so picom rules for Dokku windows (no shadow) apply to it. With picom
+  `fading = true`, add `fade = false;` to the Dokku rule (see the README).
+- **Launcher opens faster the first time.** Its widgets are built shortly after startup.
 - Apps launched from Dokku inherited the directory Dokku was started from, so a file
   manager such as Thunar opened there instead of in your home directory. Dokku now
   switches to your home directory at startup.
@@ -158,6 +225,7 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
-[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yarisgutierrez/Dokku/releases/tag/v0.2.0

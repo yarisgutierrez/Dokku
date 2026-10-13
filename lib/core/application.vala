@@ -107,19 +107,7 @@ namespace Dokku {
                 dock.reload_settings();
             });
             dock.settings_requested.connect(() => settings.show_all());
-            settings.settings_changed.connect(() => {
-                dock.reload_settings();
-                foreach (var extra in extra_docks) {
-                    extra.reload_settings();
-                }
-                sync_multi_monitor();
-            });
-            settings.settings_changed.connect(() => {
-                launcher.mark_dirty();
-                if (hotkey_manager != null) {
-                    hotkey_manager.reload_hotkeys();
-                }
-            });
+            settings.settings_changed.connect(() => apply_settings());
             settings.delete_event.connect(() => { settings.hide(); return true; });
 
             app_manager.apps_changed.connect(() => {
@@ -149,6 +137,8 @@ namespace Dokku {
             if (dbus_service == null) {
                 dbus_service = new DBusService(dock, launcher, settings, config, app_manager);
                 settings.settings_changed.connect(() => dbus_service.settings_changed());
+                // `Reload` over D-Bus does what changing a setting does
+                dbus_service.reload_requested.connect(() => apply_settings());
                 launcher.show.connect(() => dbus_service.launcher_toggled(true));
                 launcher.hide.connect(() => dbus_service.launcher_toggled(false));
 
@@ -197,6 +187,20 @@ namespace Dokku {
                 sync_multi_monitor();
                 return false;
             });
+        }
+
+        // Settings changed, from the Settings window or a Reload over D-Bus: every dock
+        // (one per monitor), the launcher and the hotkeys take the new values
+        private void apply_settings() {
+            dock.reload_settings();
+            foreach (var extra in extra_docks) {
+                extra.reload_settings();
+            }
+            sync_multi_monitor();
+            launcher.mark_dirty();
+            if (hotkey_manager != null) {
+                hotkey_manager.reload_hotkeys();
+            }
         }
 
         private void sync_multi_monitor() {

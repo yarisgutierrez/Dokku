@@ -6,6 +6,12 @@ namespace Dokku {
         private Gtk.Window? popup = null;
         private uint hover_timeout_id = 0;
         private uint dismiss_timeout_id = 0;
+        private uint flash_timeout_id = 0;
+        private Gtk.Label? flash_label = null;
+        private int flash_index = -1;
+        // The name tooltip being shown, so its text can follow a widget that changes
+        private Gtk.Label? tip_label = null;
+        private int tip_index = -1;
 
         // Item index a popup is pending/shown for, or -1.
         public int target_index { get; private set; default = -1; }
@@ -20,6 +26,8 @@ namespace Dokku {
             target_index = index;
             hover_timeout_id = Timeout.add(delay_ms, () => {
                 hover_timeout_id = 0;
+                // A message is on screen: let it be read before a hover popup replaces it
+                if (flash_timeout_id != 0) return false;
                 if (window_list)
                     show_windows(index);
                 else
@@ -36,8 +44,21 @@ namespace Dokku {
             target_index = -1;
         }
 
+        // Hover handling dismisses popups all the time (the pointer moves, an icon changes).
+        // A message from flash() is meant to be read, so it is left to run its time out;
+        // anything that opens another popup replaces it.
         public void dismiss() {
+            if (flash_timeout_id != 0) return;
+            close_popup();
+        }
+
+        private void close_popup() {
             cancel_dismiss();
+            if (flash_timeout_id != 0) { Source.remove(flash_timeout_id); flash_timeout_id = 0; }
+            flash_label = null;
+            flash_index = -1;
+            tip_label = null;
+            tip_index = -1;
             if (popup != null) {
                 popup.destroy();
                 popup = null;
@@ -64,18 +85,50 @@ namespace Dokku {
         // Remove timers and the popup window (dock being destroyed).
         public void shutdown() {
             if (hover_timeout_id != 0) { Source.remove(hover_timeout_id); hover_timeout_id = 0; }
-            dismiss();
+            close_popup();
         }
 
-        public void show_tooltip(int index) {
+        // A short message over an item, such as the volume after a scroll. Calling it
+        // again for the same item updates the text instead of rebuilding the popup.
+        public void flash(int index, string text, uint ms = 1000) {
+            if (popup != null && flash_label != null && flash_index == index) {
+                flash_label.label = text;
+            } else {
+                cancel_timer();
+                show_tooltip(index, text);
+                flash_label = popup != null ? (popup.get_child() as Gtk.Label) : null;
+                flash_index = index;
+            }
+            if (flash_timeout_id != 0) Source.remove(flash_timeout_id);
+            flash_timeout_id = Timeout.add(ms, () => {
+                flash_timeout_id = 0;
+                close_popup();
+                return Source.REMOVE;
+            });
+        }
+
+        // The text of the tooltip open over this item changes (a volume widget after a
+        // scroll): show the new text where it is. Does nothing when no tooltip is open for it.
+        public void update_tooltip_text(int index, string text) {
+            if (popup == null || tip_label == null || tip_index != index) return;
+            if (tip_label.label == text) return;
+            tip_label.label = text;
+            // The popup is as wide as its text, so fit it and centre it over the item again
+            if (Capabilities.current.session != SessionType.WAYLAND) {
+                popup.resize(1, 1);
+                host.show_popup(popup, index, 8);
+            }
+        }
+
+        public void show_tooltip(int index, string? text = null) {
             var item = host.popup_item(index);
             if (item == null) return;
 
-            dismiss();
+            close_popup();
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 
-            var label = new Gtk.Label(item.name);
+            var label = new Gtk.Label(text != null ? text : item.name);
             label.margin = 6;
             var css = new Gtk.CssProvider();
             try {
@@ -91,6 +144,8 @@ namespace Dokku {
                 return false;
             });
 
+            tip_label = label;
+            tip_index = index;
             host.show_popup(popup, index, 8);
 
             popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
@@ -110,7 +165,7 @@ namespace Dokku {
             var item = host.popup_item(index);
             if (item == null || item.windows.length() <= 1) return;
 
-            dismiss();
+            close_popup();
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 

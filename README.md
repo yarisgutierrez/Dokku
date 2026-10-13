@@ -3,24 +3,47 @@
 A macOS/GNOME-style dock and full-screen app launcher for XFCE4, running on both X11 and
 Wayland. Written in Vala (GTK3, Cairo).
 
-![Dokku](screenshots/1.png)
+![Dokku, with the now-playing popup open](screenshots/media-popup.png)
 
 ## Features
 
 - **Dock** with magnification, running-app indicators, and Cairo-drawn themes
 - **Positioning** on any screen edge (bottom, top, left, right), with multi-monitor support
+  and separate settings for each monitor
 - **Visibility:** auto-hide, and "dodge windows" (hide when windows overlap; X11)
 - **Drag and drop:** reorder icons, or drag a pinned app off the dock to unpin it
 - **Folders:** group pinned apps into dock folders
 - **Window previews** on hover for apps with several windows (X11)
 - **Notification badges, progress bars and launch/attention bounce**
 - **Recent files** in the right-click menu
+- **Mouse shortcuts:** middle-click opens a new window, scroll switches an app's windows,
+  clicking the focused app minimizes it, dropping a file on an icon opens it there, and dropping files on the Trash moves them to it
 - **Media widget** (MPRIS2) with album art; rest the pointer on it for a popup with the
-  artist, song, album, a seek bar and playback controls
+  artist, song, album, a seek bar and playback controls. Scroll on it for volume and
+  middle-click to play or pause. It follows the player that is playing, and Settings can
+  list players to ignore
 - **Frosted glass** blur via a compositor such as picom (X11)
-- **Launcher:** full-screen app grid with search and keyboard navigation
-- **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
+- **Launcher:** full-screen app grid with search and keyboard navigation; the search box also
+  calculates (`2+3*4`), finds recent files and can search the web
+- **Backup:** export, import and reset your settings from the Settings window
+- **Plugins:** built-in Trash, Show Desktop and Separator; Clock, Battery and Volume widgets
+  that you switch on; plus your own scripts (see Plugins below)
 - **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
+
+## Screenshots
+
+The dock, with magnification and the Clock, Battery and Volume widgets:
+
+![The dock](screenshots/dock.png)
+
+The launcher, and its search box doing a calculation:
+
+![The app launcher](screenshots/launcher.png)
+
+![A calculation in the launcher search](screenshots/launcher-calc.png)
+
+(These were taken with demo launchers and a stand-in music player, so they show the layout and
+not anyone's real apps.)
 
 ## Build
 
@@ -42,6 +65,14 @@ ninja -C build
 ```
 
 ## Install
+
+**Debian, Ubuntu and derivatives:** download the `.deb` from the
+[releases page](https://github.com/yarisgutierrez/Dokku/releases) and install it with
+`sudo apt install ./dokku_*.deb`. It starts at login and pulls in the libraries it needs. It is
+built on Ubuntu 24.04, so it needs a system at least as new as that (glibc 2.38; Debian 13 and
+Ubuntu 24.04 qualify). On an older system, build from source as below.
+
+**From source:**
 
 ```sh
 meson setup build --prefix=/usr
@@ -111,6 +142,7 @@ rm -r ~/.config/dokku ~/.local/share/dokku
 | Path | Purpose |
 |------|---------|
 | `~/.config/dokku/config.ini` | settings, pinned apps, folders, enabled plugins |
+| `~/.config/dokku/config.ini.bak` | what the last Import or Reset replaced |
 | `~/.local/share/dokku/themes/` | user-installed themes |
 | `~/.local/share/dokku/plugins/` | user script plugins |
 
@@ -163,17 +195,84 @@ Configuration lives in `~/.config/dokku/`. See `man dokku` for the config
 format, theme format and file locations. User themes go in
 `~/.local/share/dokku/themes/`.
 
+## Plugins
+
+Settings, Behavior, Dock Items lists the plugins. **Clock**, **Battery** and **Volume** come with
+Dokku and are off until you switch them on. The battery widget hides itself on a machine without
+a battery. The volume widget uses `wpctl` (PipeWire) or `pactl` (PulseAudio): click mutes and
+scroll changes the volume.
+
+To write your own, put a folder with a `plugin.ini` in `~/.local/share/dokku/plugins/`, or
+install a `.zip` of it from Settings. A widget shows text on its icon:
+
+```ini
+[Plugin]
+id=uptime
+name=Uptime
+type=widget
+# either a strftime format ...
+# format=%H:%M
+# ... or a script (a file in this folder, or a command; arguments are fine). Its first
+# line goes on the icon and the lines after it become the tooltip.
+script=uptime.sh
+interval=60                 # seconds between refreshes
+command=uptime.sh click     # runs when the widget is clicked
+scroll_up=uptime.sh up      # runs on scroll up and scroll down
+scroll_down=uptime.sh down
+tooltip_format=%A, %e %B    # with format=: the tooltip
+hide_when_empty=true        # no output: take no room on the dock
+default_enabled=false       # start switched off
+```
+
+A plugin of yours with the same `id` as one that ships with Dokku replaces it. When running
+from a source tree, `DOKKU_PLUGIN_DIR=data/plugins ./build/src/dokku` loads the bundled ones.
+
 ## Compositor notes
 
 Frosted glass needs a compositor with blur support. Dokku sets these X11
 properties so compositor rules can target its windows:
 
-- `_DOKKU_WINDOW` on every Dokku window (dock, blur backdrop, settings): use it
-  to disable blur and shadow for Dokku by default.
+- `_DOKKU_WINDOW` on every Dokku window (dock, blur backdrop, launcher, settings):
+  use it to disable blur and shadow for Dokku by default.
 - `_DOKKU_BLUR` on the capsule-shaped backdrop window only: enable blur for
   windows matching both `_DOKKU_WINDOW` and `_DOKKU_BLUR`.
 
 `_COMPTON_SHADOW` is set to 0 so picom draws no shadow.
+
+**picom blurs every window once `blur-method` is set.** In picom v13, setting `blur-method`
+(for example `dual_kawase`) turns background blur on for all windows by default, not only
+the ones your rules name. Menus and other popups are windows with a transparent margin
+around them (room for their shadow), and the blur covers the whole window, margin
+included, so each menu gets a blurred box around it. The `xrender` backend does not
+support `dual_kawase`, so it blurs nothing and shows no box, which is why the problem
+appears only with the GL backends. Keep blur for the dock and switch it off for menus:
+
+```
+rules: ({
+  match = "window_type = 'popup_menu' || window_type = 'dropdown_menu' || window_type = 'menu'";
+  blur-background = false;
+}, {
+  match = "_DOKKU_WINDOW@ && _DOKKU_BLUR@";
+  blur-background = true;
+}, ...)
+```
+
+To blur only the dock's backdrop, put a first rule `{ match = "!_DOKKU_BLUR@"; blur-background = false; }`
+instead.
+
+**picom and the launcher fade:** on X11 the launcher fades in and out by changing the
+window's `_NET_WM_WINDOW_OPACITY`, so the compositor does the blending. If picom has
+`fading = true`, it also smooths those changes at its own pace, and the launcher
+fades slowly and then pops out. Turn picom's fade off for Dokku windows with a rule:
+
+```
+rules: ({
+  match = "_DOKKU_WINDOW@";
+  shadow = false;
+  blur-background = false;
+  fade = false;
+}, ...)
+```
 
 ## Project layout
 

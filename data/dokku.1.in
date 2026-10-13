@@ -40,10 +40,34 @@ include Trash, Show Desktop, and Separator.
 .B Theming
 Installable themes for dock customization. Themes are stored in
 ~/.local/share/dokku/themes/
+.SH PLUGINS
+Plugins are folders with a
+.I plugin.ini
+in
+.I ~/.local/share/dokku/plugins/
+(or in the data directories under
+.IR dokku/plugins/ ,
+where the Clock, Battery and Volume plugins ship; they start switched off). A
+widget plugin shows text on its icon, from a strftime
+.B format
+or from the first line of a
+.B script
+(later lines become the tooltip). Other keys:
+.BR interval ,
+.BR command ,
+.BR scroll_up ,
+.BR scroll_down ,
+.BR tooltip_format ,
+.B hide_when_empty
+and
+.BR default_enabled .
 .SH FILES
 .TP
 .I ~/.config/dokku/config.ini
 User configuration file containing pinned apps, dock settings, and enabled plugins.
+.TP
+.I ~/.config/dokku/config.ini.bak
+The settings that the last Import or Reset replaced.
 .TP
 .I ~/.local/share/dokku/themes/
 User-installed themes directory.
@@ -64,7 +88,46 @@ theme=default
 
 [Plugins]
 enabled=trash;show-desktop
+
+[Media]
+blocked_players=firefox;chromium;chrome
+
+[Launcher]
+web_search_url=https://duckduckgo.com/?q=%s
+
+[Monitor:DEL DP-2 3440x1440]
+position=left
+icon_size=40
+auto_hide=true
 .fi
+.PP
+A
+.B [Monitor:...]
+section gives one monitor its own
+.BR position ,
+.B icon_size
+and
+.BR auto_hide ;
+anything left out follows the
+.B [Dock]
+section. The name is the monitor's make, model and size, with
+.B #1
+and
+.B #2
+added (left to right) when two monitors are identical. Settings, Behavior, Monitors edits
+them.
+.PP
+The media widget follows the MPRIS2 player that is playing, and keeps it until
+another player starts. Players whose D-Bus name contains a word in
+.B blocked_players
+are ignored. The default list covers common web browsers. An empty list ignores
+nothing. The same list is under Settings, Behavior, Ignored players.
+.PP
+In the launcher's search box, a calculation such as 2+3*4 shows its answer and
+recent files that match are listed. When no app matches, a row searches the web
+at
+.B web_search_url
+(%s stands for the search words; an empty value turns the row off).
 .SH THEME FORMAT
 Themes use INI format with the following sections:
 .PP

@@ -22,8 +22,12 @@ namespace Dokku {
 
         public void reload() throws DBusError, IOError {
             config.reload();
-            dock.reload_settings();
+            reload_requested();
         }
+
+        // Not exported on the bus: tells the application to apply the settings it just reread
+        [DBus (visible = false)]
+        public signal void reload_requested();
 
         public void toggle_launcher() throws DBusError, IOError {
             launcher.toggle();

@@ -38,39 +38,28 @@ namespace Dokku {
         private DBusConnection? dbus_connection = null;
         private uint name_owner_subscription_id = 0;
 
-        // Preferred MPRIS2 players in priority order
-        private const string[] PREFERRED_PLAYERS = {
-            "spotify",
-            "vlc",
-            "rhythmbox",
-            "audacious",
-            "clementine",
-            "strawberry"
-        };
+        private string[] blocked_players;
+        private uint rescan_timeout_id = 0;
+        private uint props_subscription_id = 0;
+        private double volume_target = -1;
+        private int64 volume_target_us = 0;
+        private bool reselecting = false;
+        private bool reselect_again = false;
 
-        // Browsers and non-music sources to ignore
-        private const string[] BLOCKED_PLAYERS = {
-            "firefox", "chromium", "chrome", "brave", "opera",
-            "vivaldi", "edge", "epiphany", "midori",
-            "plasma-browser-integration", "kdeconnect"
-        };
-
-        public MediaPlugin() {
+        public MediaPlugin(string[] blocked_players) {
+            this.blocked_players = blocked_players;
             watch_media_players.begin();
         }
 
-        private bool is_blocked_player(string bus_name) {
-            var lower = bus_name.down();
-            foreach (var blocked in BLOCKED_PLAYERS) {
-                if (lower.contains(blocked)) return true;
-            }
-            return false;
-        }
-
         ~MediaPlugin() {
+            if (rescan_timeout_id != 0) Source.remove(rescan_timeout_id);
             if (dbus_connection != null && name_owner_subscription_id != 0) {
                 dbus_connection.signal_unsubscribe(name_owner_subscription_id);
                 name_owner_subscription_id = 0;
+            }
+            if (dbus_connection != null && props_subscription_id != 0) {
+                dbus_connection.signal_unsubscribe(props_subscription_id);
+                props_subscription_id = 0;
             }
             disconnect_player();
         }
@@ -91,60 +80,105 @@ namespace Dokku {
                     on_name_owner_changed
                 );
 
+                // A player starting or stopping playback can change which one we follow
+                props_subscription_id = connection.signal_subscribe(
+                    null,
+                    "org.freedesktop.DBus.Properties",
+                    "PropertiesChanged",
+                    "/org/mpris/MediaPlayer2",
+                    "org.mpris.MediaPlayer2.Player",
+                    DBusSignalFlags.MATCH_ARG0_NAMESPACE,
+                    on_any_player_properties_changed
+                );
+
                 // Scan for existing players
-                yield scan_for_players(connection);
+                yield reselect();
             } catch (Error e) {
                 warning("MediaPlugin: Failed to watch D-Bus: %s", e.message);
             }
         }
 
-        private async void scan_for_players(DBusConnection connection) {
+        // Lists the MPRIS2 players on the bus, asks each what it is doing, and moves the
+        // widget to the one MediaPlayerPicker chooses. Overlapping calls are folded into
+        // one rerun so a burst of signals costs a single extra pass.
+        private async void reselect() {
+            if (reselecting) {
+                reselect_again = true;
+                return;
+            }
+            reselecting = true;
+            do {
+                reselect_again = false;
+                yield reselect_once();
+            } while (reselect_again);
+            reselecting = false;
+        }
+
+        private async void reselect_once() {
+            if (dbus_connection == null) return;
+            var connection = dbus_connection;
+            string[] names = {};
+            PlayerStatus[] statuses = {};
             try {
                 var result = yield connection.call(
-                    "org.freedesktop.DBus",
-                    "/org/freedesktop/DBus",
-                    "org.freedesktop.DBus",
-                    "ListNames",
-                    null,
-                    new VariantType("(as)"),
-                    DBusCallFlags.NONE,
-                    5000,
-                    null
-                );
+                    "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus",
+                    "ListNames", null, new VariantType("(as)"), DBusCallFlags.NONE, 5000, null);
 
-                var names = result.get_child_value(0);
-                var iter = names.iterator();
+                var iter = result.get_child_value(0).iterator();
                 string? name_str;
-
-                // Find best player by preference
-                string? best = null;
-                int best_priority = int.MAX;
-
                 while (iter.next("s", out name_str)) {
                     if (!name_str.has_prefix("org.mpris.MediaPlayer2.")) continue;
-                    if (is_blocked_player(name_str)) continue;
-
-                    int priority = get_player_priority(name_str);
-                    if (priority < best_priority) {
-                        best_priority = priority;
-                        best = name_str;
-                    }
-                }
-
-                if (best != null) {
-                    yield connect_to_player(best);
+                    if (MediaPlayerPicker.is_blocked(name_str, blocked_players)) continue;
+                    names += name_str;
                 }
             } catch (Error e) {
                 warning("MediaPlugin: Failed to list D-Bus names: %s", e.message);
+                return;
+            }
+
+            foreach (var n in names) {
+                statuses += yield read_status(connection, n);
+            }
+
+            var best = MediaPlayerPicker.choose(names, statuses, current_bus_name);
+            if (best == current_bus_name) return;
+
+            bool had_player = current_bus_name != null;
+            disconnect_player();
+            if (best != null) yield connect_to_player(best);
+            // The widget may have to appear, change or go away
+            if (had_player || _has_media) changed();
+        }
+
+        private async PlayerStatus read_status(DBusConnection connection, string bus_name) {
+            try {
+                var reply = yield connection.call(
+                    bus_name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "Get",
+                    new Variant("(ss)", "org.mpris.MediaPlayer2.Player", "PlaybackStatus"),
+                    new VariantType("(v)"), DBusCallFlags.NONE, 1000, null);
+                Variant boxed;
+                reply.get("(v)", out boxed);
+                return PlayerStatus.parse(boxed.get_string());
+            } catch (Error e) {
+                return PlayerStatus.UNKNOWN;
             }
         }
 
-        private int get_player_priority(string bus_name) {
-            var lower = bus_name.down();
-            for (int i = 0; i < PREFERRED_PLAYERS.length; i++) {
-                if (lower.contains(PREFERRED_PLAYERS[i])) return i;
-            }
-            return PREFERRED_PLAYERS.length;
+        // The user edited the ignored-players list; apply it without a restart
+        public void set_blocked_players(string[] players) {
+            if (string.joinv("\n", players) == string.joinv("\n", blocked_players)) return;
+            blocked_players = players;
+            schedule_reselect();
+        }
+
+        // Several signals arrive together when a player starts up or changes track
+        private void schedule_reselect() {
+            if (rescan_timeout_id != 0) return;
+            rescan_timeout_id = Timeout.add(120, () => {
+                rescan_timeout_id = 0;
+                reselect.begin();
+                return Source.REMOVE;
+            });
         }
 
         private void on_name_owner_changed(DBusConnection connection, string? sender,
@@ -156,29 +190,20 @@ namespace Dokku {
             parameters.get("(sss)", out name_str, out old_owner, out new_owner);
 
             if (!name_str.has_prefix("org.mpris.MediaPlayer2.")) return;
-            if (is_blocked_player(name_str)) return;
+            schedule_reselect();
+        }
 
-            if (new_owner != "" && player_proxy == null) {
-                // New player appeared and we don't have one yet
-                connect_to_player.begin(name_str);
-            } else if (new_owner != "" && player_proxy != null) {
-                // New player appeared but we already have one — switch if higher priority
-                int new_priority = get_player_priority(name_str);
-                int cur_priority = current_bus_name != null ? get_player_priority(current_bus_name) : int.MAX;
-                if (new_priority < cur_priority) {
-                    disconnect_player();
-                    connect_to_player.begin(name_str);
-                }
-            } else if (old_owner != "" && name_str == current_bus_name) {
-                // Our player vanished
-                disconnect_player();
-                changed();
-                // Try to find another player
-                scan_for_players.begin(connection);
+        private void on_any_player_properties_changed(DBusConnection connection, string? sender,
+                                                       string object_path, string interface_name,
+                                                       string signal_name, Variant parameters) {
+            Variant changed_props = parameters.get_child_value(1);
+            if (changed_props.lookup_value("PlaybackStatus", null) != null) {
+                schedule_reselect();
             }
         }
 
         private void disconnect_player() {
+            volume_target = -1;
             player_proxy = null;
             current_bus_name = null;
             player_name = "";
@@ -441,6 +466,39 @@ namespace Dokku {
             } catch (Error e) {
                 return -1;
             }
+        }
+
+        // The player's volume from 0.0 to 1.0, or -1 when it has no volume control
+        public double volume {
+            get {
+                if (player_proxy == null) return -1;
+                if (volume_target >= 0 && GLib.get_monotonic_time() - volume_target_us < 1500000) {
+                    return volume_target;
+                }
+                var v = player_proxy.get_cached_property("Volume");
+                return v != null ? v.get_double() : -1;
+            }
+        }
+
+        // Changes the volume by delta (a fraction of full scale) and returns the new value,
+        // or -1 when the player has no volume control. The new value is remembered for a
+        // moment, because players answer a quick run of scroll steps late.
+        public double change_volume(double delta) {
+            double current = volume;
+            if (current < 0 || player_proxy == null || current_bus_name == null) return -1;
+            double target = (current + delta).clamp(0.0, 1.0);
+            volume_target = target;
+            volume_target_us = GLib.get_monotonic_time();
+            player_proxy.get_connection().call.begin(
+                current_bus_name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "Set",
+                new Variant("(ssv)", "org.mpris.MediaPlayer2.Player", "Volume", new Variant.double(target)),
+                null, DBusCallFlags.NONE, 1000, null,
+                (obj, res) => {
+                    try { player_proxy.get_connection().call.end(res); }
+                    catch (Error e) { warning("MediaPlugin: setting the volume failed: %s", e.message); }
+                }
+            );
+            return target;
         }
 
         public void seek_to(int64 position_us) {
