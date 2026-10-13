@@ -3,7 +3,7 @@
 A macOS/GNOME-style dock and full-screen app launcher for XFCE4, running on both X11 and
 Wayland. Written in Vala (GTK3, Cairo).
 
-![Dokku](screenshots/1.png)
+![Dokku, with the now-playing popup open](screenshots/media-popup.png)
 
 ## Features
 
@@ -29,6 +29,21 @@ Wayland. Written in Vala (GTK3, Cairo).
 - **Plugins:** built-in Trash, Show Desktop and Separator; Clock, Battery and Volume widgets
   that you switch on; plus your own scripts (see Plugins below)
 - **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
+
+## Screenshots
+
+The dock, with magnification and the Clock, Battery and Volume widgets:
+
+![The dock](screenshots/dock.png)
+
+The launcher, and its search box doing a calculation:
+
+![The app launcher](screenshots/launcher.png)
+
+![A calculation in the launcher search](screenshots/launcher-calc.png)
+
+(These were taken with demo launchers and a stand-in music player, so they show the layout and
+not anyone's real apps.)
 
 ## Build
 
