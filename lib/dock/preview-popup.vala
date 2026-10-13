@@ -9,6 +9,9 @@ namespace Dokku {
         private uint flash_timeout_id = 0;
         private Gtk.Label? flash_label = null;
         private int flash_index = -1;
+        // The name tooltip being shown, so its text can follow a widget that changes
+        private Gtk.Label? tip_label = null;
+        private int tip_index = -1;
 
         // Item index a popup is pending/shown for, or -1.
         public int target_index { get; private set; default = -1; }
@@ -44,6 +47,8 @@ namespace Dokku {
             if (flash_timeout_id != 0) { Source.remove(flash_timeout_id); flash_timeout_id = 0; }
             flash_label = null;
             flash_index = -1;
+            tip_label = null;
+            tip_index = -1;
             if (popup != null) {
                 popup.destroy();
                 popup = null;
@@ -92,6 +97,19 @@ namespace Dokku {
             });
         }
 
+        // The text of the tooltip open over this item changes (a volume widget after a
+        // scroll): show the new text where it is. Does nothing when no tooltip is open for it.
+        public void update_tooltip_text(int index, string text) {
+            if (popup == null || tip_label == null || tip_index != index) return;
+            if (tip_label.label == text) return;
+            tip_label.label = text;
+            // The popup is as wide as its text, so fit it and centre it over the item again
+            if (Capabilities.current.session != SessionType.WAYLAND) {
+                popup.resize(1, 1);
+                host.show_popup(popup, index, 8);
+            }
+        }
+
         public void show_tooltip(int index, string? text = null) {
             var item = host.popup_item(index);
             if (item == null) return;
@@ -116,6 +134,8 @@ namespace Dokku {
                 return false;
             });
 
+            tip_label = label;
+            tip_index = index;
             host.show_popup(popup, index, 8);
 
             popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |

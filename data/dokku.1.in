@@ -40,6 +40,27 @@ include Trash, Show Desktop, and Separator.
 .B Theming
 Installable themes for dock customization. Themes are stored in
 ~/.local/share/dokku/themes/
+.SH PLUGINS
+Plugins are folders with a
+.I plugin.ini
+in
+.I ~/.local/share/dokku/plugins/
+(or in the data directories under
+.IR dokku/plugins/ ,
+where the Clock, Battery and Volume plugins ship; they start switched off). A
+widget plugin shows text on its icon, from a strftime
+.B format
+or from the first line of a
+.B script
+(later lines become the tooltip). Other keys:
+.BR interval ,
+.BR command ,
+.BR scroll_up ,
+.BR scroll_down ,
+.BR tooltip_format ,
+.B hide_when_empty
+and
+.BR default_enabled .
 .SH FILES
 .TP
 .I ~/.config/dokku/config.ini

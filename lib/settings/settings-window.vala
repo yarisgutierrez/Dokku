@@ -572,9 +572,11 @@ namespace Dokku {
 
             // User plugins
             foreach (var plugin in plugin_manager.get_user_plugins()) {
-                items_grid.attach(make_setting_label(plugin.name, "User-installed plugin"), 0, row, 1, 1);
+                var script_plugin = plugin as ScriptPlugin;
+                bool on_by_default = script_plugin == null || script_plugin.enabled_by_default;
+                items_grid.attach(make_setting_label(plugin.name, "Plugin"), 0, row, 1, 1);
                 var sw = new Gtk.Switch();
-                sw.active = config.get_plugin_enabled(plugin.id);
+                sw.active = config.get_plugin_enabled(plugin.id, on_by_default);
                 sw.halign = Gtk.Align.START;
                 sw.valign = Gtk.Align.CENTER;
                 var pid = plugin.id;

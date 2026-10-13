@@ -322,11 +322,11 @@ namespace Dokku {
             save();
         }
 
-        public bool get_plugin_enabled(string plugin_id) {
+        public bool get_plugin_enabled(string plugin_id, bool default_value = true) {
             try {
                 return keyfile.get_boolean("Plugins", plugin_id);
             } catch (Error e) {
-                return true; // Default enabled
+                return default_value;
             }
         }
 

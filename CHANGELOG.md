@@ -7,6 +7,18 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Clock, Battery and Volume widgets.** Three plugins ship with Dokku and start switched off;
+  enable them under Settings, Behavior. The clock shows the time with the date as its tooltip,
+  the battery shows the charge (and hides itself on a machine without one), and the volume
+  widget shows the output level, mutes on click and changes the volume on scroll (PipeWire's
+  `wpctl`, or `pactl`).
+- **Widget plugins can scroll, explain themselves and hide.** In `plugin.ini`: `scroll_up` and
+  `scroll_down` commands, `tooltip_format` for clocks, `hide_when_empty`, and
+  `default_enabled`. A script's first line goes on the icon and the lines after it become the
+  tooltip. A widget refreshes as soon as its click or scroll command finishes. Plugins that
+  ship with Dokku are read from `/usr/share/dokku/plugins`; one of yours with the same id wins.
+- **`.deb` packages and CI.** `packaging/build-deb.sh` builds a package, a GitHub Actions
+  workflow builds it on every push, and pushing a `v*` tag publishes a release with it.
 - **Back up and restore your settings.** Settings, Behavior, Backup has Export (save
   `config.ini` to a file), Import (load one back) and Reset (back to the defaults). Import
   refuses a file that is too large, not settings, or has a value of the wrong kind, and

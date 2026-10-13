@@ -373,12 +373,14 @@ namespace Dokku {
 
             // User script widget plugins
             foreach (var up in plugin_manager.get_user_plugins()) {
-                if (!config.get_plugin_enabled(up.id)) continue;
                 var sp = up as ScriptPlugin;
-                if (sp != null && sp.is_widget) {
-                    items.append(new DockItem.from_plugin(sp));
-                    if (wire_once(sp)) sp.updated.connect(() => schedule_redraw());
-                }
+                if (sp == null || !sp.is_widget) continue;
+                if (wire_once(sp)) sp.updated.connect(() => on_widget_plugin_updated(sp));
+                if (!config.get_plugin_enabled(up.id, sp.enabled_by_default)) continue;
+                if (!sp.visible_in_dock) continue;
+                var widget_item = new DockItem.from_plugin(sp);
+                widget_item.name = sp.tooltip;
+                items.append(widget_item);
             }
 
             if (config.get_plugin_enabled("show-desktop")
@@ -399,6 +401,33 @@ namespace Dokku {
                     }
                 }
             }
+        }
+
+        private uint widget_reload_id = 0;
+
+        // A widget plugin has new text. Its tooltip follows, and a widget that appeared or
+        // went away (a battery widget when a battery is plugged in) changes what the dock holds.
+        private void on_widget_plugin_updated(ScriptPlugin sp) {
+            bool shown = false;
+            int index = 0;
+            foreach (var item in items) {
+                if (item.plugin == sp) {
+                    shown = true;
+                    item.name = sp.tooltip;
+                    // A tooltip already open over the widget follows its new text
+                    preview.update_tooltip_text(index, sp.tooltip);
+                }
+                index++;
+            }
+            bool wanted = config.get_plugin_enabled(sp.id, sp.enabled_by_default) && sp.visible_in_dock;
+            if (wanted != shown && widget_reload_id == 0) {
+                widget_reload_id = Idle.add(() => {
+                    widget_reload_id = 0;
+                    reload_settings();
+                    return Source.REMOVE;
+                });
+            }
+            schedule_redraw();
         }
 
         private void update_media_widget(MediaPlugin media) {
@@ -1732,6 +1761,12 @@ namespace Dokku {
                 // Scrolling up raises the volume
                 double v = (item.plugin as MediaPlugin).change_volume(-steps * (smooth ? 0.03 : 0.05));
                 if (v >= 0) preview.flash(index, "Volume %d%%".printf((int) Math.round(v * 100)));
+                return true;
+            }
+
+            // A widget plugin with scroll commands, such as a volume control
+            if (item.plugin is ScriptPlugin && (item.plugin as ScriptPlugin).has_scroll) {
+                (item.plugin as ScriptPlugin).scroll(steps < 0);
                 return true;
             }
 

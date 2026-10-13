@@ -60,6 +60,11 @@ install_data('data/dokku-autostart.desktop',
   install_dir: join_paths(get_option('sysconfdir'), 'xdg/autostart')
 )
 
+# Plugins that ship with Dokku: widgets for the clock, battery and volume, off until enabled
+install_subdir('data/plugins',
+  install_dir: join_paths(get_option('datadir'), 'dokku')
+)
+
 install_data('data/icons/dokku.svg',
   install_dir: join_paths(get_option('datadir'), 'icons/hicolor/scalable/apps')
 )

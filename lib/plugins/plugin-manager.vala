@@ -20,12 +20,26 @@ namespace Dokku {
             register_plugin(new MediaPlugin(config.get_media_blocked_players()));
         }
 
+        // Plugins that ship with Dokku, in the data directories (/usr/share/dokku/plugins), and
+        // those the user installed. A user plugin with the same id replaces a bundled one.
+        // DOKKU_PLUGIN_DIR adds one more directory, for running from a source tree.
         private void load_user_plugins() {
+            var dirs = new List<string>();
+            string? extra = Environment.get_variable("DOKKU_PLUGIN_DIR");
+            if (extra != null && extra != "") dirs.append(extra);
+            foreach (var data_dir in Environment.get_system_data_dirs()) {
+                dirs.append(Path.build_filename(data_dir, "dokku", "plugins"));
+            }
+            dirs.append(user_plugins_dir);
+            foreach (var dir in dirs) load_plugins_from(dir);
+        }
+
+        private void load_plugins_from(string plugins_dir) {
             try {
-                var dir = Dir.open(user_plugins_dir);
+                var dir = Dir.open(plugins_dir);
                 string? name;
                 while ((name = dir.read_name()) != null) {
-                    var plugin_file = Path.build_filename(user_plugins_dir, name, "plugin.ini");
+                    var plugin_file = Path.build_filename(plugins_dir, name, "plugin.ini");
                     if (FileUtils.test(plugin_file, FileTest.EXISTS)) {
                         var plugin = new ScriptPlugin.from_file(plugin_file);
                         if (plugin.id != null) {
@@ -34,7 +48,8 @@ namespace Dokku {
                     }
                 }
             } catch (Error e) {
-                warning("Failed to load user plugins: %s", e.message);
+                // A directory that does not exist is normal
+                if (plugins_dir == user_plugins_dir) warning("Failed to load user plugins: %s", e.message);
             }
         }
 
@@ -53,6 +68,8 @@ namespace Dokku {
                     list.append(plugin);
                 }
             }
+            // The hash table has no order of its own; keep the widgets where they were put
+            list.sort((a, b) => strcmp(a.id, b.id));
             return list;
         }
 

@@ -25,7 +25,8 @@ Wayland. Written in Vala (GTK3, Cairo).
 - **Launcher:** full-screen app grid with search and keyboard navigation; the search box also
   calculates (`2+3*4`), finds recent files and can search the web
 - **Backup:** export, import and reset your settings from the Settings window
-- **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
+- **Plugins:** built-in Trash, Show Desktop and Separator; Clock, Battery and Volume widgets
+  that you switch on; plus your own scripts (see Plugins below)
 - **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
 
 ## Build
@@ -177,6 +178,38 @@ dokku --version      # print the version
 Configuration lives in `~/.config/dokku/`. See `man dokku` for the config
 format, theme format and file locations. User themes go in
 `~/.local/share/dokku/themes/`.
+
+## Plugins
+
+Settings, Behavior, Dock Items lists the plugins. **Clock**, **Battery** and **Volume** come with
+Dokku and are off until you switch them on. The battery widget hides itself on a machine without
+a battery. The volume widget uses `wpctl` (PipeWire) or `pactl` (PulseAudio): click mutes and
+scroll changes the volume.
+
+To write your own, put a folder with a `plugin.ini` in `~/.local/share/dokku/plugins/`, or
+install a `.zip` of it from Settings. A widget shows text on its icon:
+
+```ini
+[Plugin]
+id=uptime
+name=Uptime
+type=widget
+# either a strftime format ...
+# format=%H:%M
+# ... or a script (a file in this folder, or a command; arguments are fine). Its first
+# line goes on the icon and the lines after it become the tooltip.
+script=uptime.sh
+interval=60                 # seconds between refreshes
+command=uptime.sh click     # runs when the widget is clicked
+scroll_up=uptime.sh up      # runs on scroll up and scroll down
+scroll_down=uptime.sh down
+tooltip_format=%A, %e %B    # with format=: the tooltip
+hide_when_empty=true        # no output: take no room on the dock
+default_enabled=false       # start switched off
+```
+
+A plugin of yours with the same `id` as one that ships with Dokku replaces it. When running
+from a source tree, `DOKKU_PLUGIN_DIR=data/plugins ./build/src/dokku` loads the bundled ones.
 
 ## Compositor notes
 
