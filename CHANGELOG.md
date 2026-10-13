@@ -108,6 +108,9 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **Dokku did not build against gtk-layer-shell older than 0.9**, which includes Ubuntu 24.04
+  (it ships 0.8). It uses `gtk_layer_try_force_commit` where the library has it and asks GTK
+  to redraw the dock where it does not. Found by the new CI.
 - **Messages over the dock vanished almost at once.** Hover handling dismissed them as soon as the
   pointer moved. A message now stays for its full time.
 - **The Trash icon stayed "empty" after the first file was trashed** when the Trash folder

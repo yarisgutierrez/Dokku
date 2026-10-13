@@ -336,7 +336,12 @@ namespace Dokku {
         // next commit, which would otherwise wait for the dock to redraw. Force one.
         private void set_layer_shell_keyboard_mode(GtkLayerShell.KeyboardMode mode) {
             GtkLayerShell.set_keyboard_mode(this, mode);
+#if HAVE_LAYER_SHELL_FORCE_COMMIT
             GtkLayerShell.try_force_commit(this);
+#else
+            // gtk-layer-shell before 0.9 cannot force a commit; a redraw makes GTK send one
+            queue_draw();
+#endif
         }
 
         private void apply_layer_shell_anchors() {
@@ -1506,7 +1511,8 @@ namespace Dokku {
             int over_drop = get_item_at(is_vertical ? (double) y : (double) x);
             var over_drop_item = over_drop >= 0 ? items.nth_data(over_drop) : null;
             if (over_drop_item != null && over_drop_item.plugin is TrashPlugin && uris.length > 0) {
-                int sent = (over_drop_item.plugin as TrashPlugin).trash_uris(uris);
+                var trash_plugin = (TrashPlugin) over_drop_item.plugin;
+                int sent = trash_plugin.trash_uris(uris);
                 if (sent == 0) preview.flash(over_drop, "That can't be moved to the Trash", 1800);
                 clear_file_drop_state();
                 drop_insert_index = -1;
@@ -1785,7 +1791,7 @@ namespace Dokku {
             var item = items.nth_data(index);
             if (item == null) return;
             if (item.is_media_widget && item.plugin is MediaPlugin) {
-                (item.plugin as MediaPlugin).activate();
+                ((MediaPlugin) item.plugin).activate();
                 return;
             }
             if (item.is_launcher || item.is_folder || item.is_separator || item.is_plugin) return;
@@ -1832,14 +1838,15 @@ namespace Dokku {
 
             if (item.is_media_widget && item.plugin is MediaPlugin) {
                 // Scrolling up raises the volume
-                double v = (item.plugin as MediaPlugin).change_volume(-steps * (smooth ? 0.03 : 0.05));
+                double v = ((MediaPlugin) item.plugin).change_volume(-steps * (smooth ? 0.03 : 0.05));
                 if (v >= 0) preview.flash(index, "Volume %d%%".printf((int) Math.round(v * 100)));
                 return true;
             }
 
             // A widget plugin with scroll commands, such as a volume control
-            if (item.plugin is ScriptPlugin && (item.plugin as ScriptPlugin).has_scroll) {
-                (item.plugin as ScriptPlugin).scroll(steps < 0);
+            var script_plugin = item.plugin as ScriptPlugin;
+            if (script_plugin != null && script_plugin.has_scroll) {
+                script_plugin.scroll(steps < 0);
                 return true;
             }
 

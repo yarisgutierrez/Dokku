@@ -16,13 +16,20 @@ atspi_dep = dependency('atspi-2', required: false)
 wayland_client_dep = dependency('wayland-client', required: false)
 wayland_scanner = find_program('wayland-scanner', required: false)
 
+layer_shell_dep = dependency('gtk-layer-shell-0')
+
+# gtk_layer_try_force_commit () arrived in gtk-layer-shell 0.9 (Ubuntu 24.04 has 0.8)
+if layer_shell_dep.version().version_compare('>= 0.9.0')
+  add_project_arguments('-D', 'HAVE_LAYER_SHELL_FORCE_COMMIT', language: 'vala')
+endif
+
 dependencies = [
   dependency('gtk+-3.0'),
   dependency('glib-2.0'),
   dependency('gio-2.0'),
   dependency('gio-unix-2.0'),
   dependency('libwnck-3.0'),
-  dependency('gtk-layer-shell-0'),
+  layer_shell_dep,
   dependency('keybinder-3.0', version: '>= 0.3.0'),
   dependency('x11'),
   cc.find_library('m', required: true),
