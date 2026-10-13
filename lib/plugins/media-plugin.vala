@@ -41,6 +41,8 @@ namespace Dokku {
         private string[] blocked_players;
         private uint rescan_timeout_id = 0;
         private uint props_subscription_id = 0;
+        private double volume_target = -1;
+        private int64 volume_target_us = 0;
         private bool reselecting = false;
         private bool reselect_again = false;
 
@@ -201,6 +203,7 @@ namespace Dokku {
         }
 
         private void disconnect_player() {
+            volume_target = -1;
             player_proxy = null;
             current_bus_name = null;
             player_name = "";
@@ -463,6 +466,39 @@ namespace Dokku {
             } catch (Error e) {
                 return -1;
             }
+        }
+
+        // The player's volume from 0.0 to 1.0, or -1 when it has no volume control
+        public double volume {
+            get {
+                if (player_proxy == null) return -1;
+                if (volume_target >= 0 && GLib.get_monotonic_time() - volume_target_us < 1500000) {
+                    return volume_target;
+                }
+                var v = player_proxy.get_cached_property("Volume");
+                return v != null ? v.get_double() : -1;
+            }
+        }
+
+        // Changes the volume by delta (a fraction of full scale) and returns the new value,
+        // or -1 when the player has no volume control. The new value is remembered for a
+        // moment, because players answer a quick run of scroll steps late.
+        public double change_volume(double delta) {
+            double current = volume;
+            if (current < 0 || player_proxy == null || current_bus_name == null) return -1;
+            double target = (current + delta).clamp(0.0, 1.0);
+            volume_target = target;
+            volume_target_us = GLib.get_monotonic_time();
+            player_proxy.get_connection().call.begin(
+                current_bus_name, "/org/mpris/MediaPlayer2", "org.freedesktop.DBus.Properties", "Set",
+                new Variant("(ssv)", "org.mpris.MediaPlayer2.Player", "Volume", new Variant.double(target)),
+                null, DBusCallFlags.NONE, 1000, null,
+                (obj, res) => {
+                    try { player_proxy.get_connection().call.end(res); }
+                    catch (Error e) { warning("MediaPlugin: setting the volume failed: %s", e.message); }
+                }
+            );
+            return target;
         }
 
         public void seek_to(int64 position_us) {

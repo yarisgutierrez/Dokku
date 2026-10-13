@@ -454,6 +454,18 @@ namespace Dokku {
             var items_grid = make_card_grid();
             row = 0;
 
+            // Click the active app to minimize it
+            items_grid.attach(make_setting_label("Minimize on click", "Clicking the icon of the focused app minimizes it"), 0, row, 1, 1);
+            var minimize_switch = new Gtk.Switch();
+            minimize_switch.active = config.get_minimize_on_click();
+            minimize_switch.halign = Gtk.Align.START;
+            minimize_switch.valign = Gtk.Align.CENTER;
+            minimize_switch.notify["active"].connect(() => {
+                config.set_minimize_on_click(minimize_switch.active);
+                schedule_apply();
+            });
+            items_grid.attach(minimize_switch, 1, row++, 1, 1);
+
             // Media widget
             items_grid.attach(make_setting_label("Media widget", "Show media player controls on the dock"), 0, row, 1, 1);
             var media_switch = new Gtk.Switch();

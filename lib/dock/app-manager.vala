@@ -208,6 +208,27 @@ namespace Dokku {
             }
         }
 
+        // Whether the entry takes files or URLs on its command line (%f, %F, %u, %U)
+        public bool can_open_files() {
+            if (desktop_file == null || desktop_file == "") return false;
+            var info = new DesktopAppInfo.from_filename(desktop_file);
+            return info != null && (info.supports_uris() || info.supports_files());
+        }
+
+        // Opens the given URIs with this application
+        public bool open_files(List<string> uris) {
+            if (desktop_file == null || desktop_file == "") return false;
+            var info = new DesktopAppInfo.from_filename(desktop_file);
+            if (info == null) return false;
+            try {
+                var display = Gdk.Display.get_default();
+                return info.launch_uris(uris, display != null ? display.get_app_launch_context() : null);
+            } catch (Error e) {
+                warning("Failed to open files with %s: %s", name, e.message);
+                return false;
+            }
+        }
+
         public void launch() {
             // Let GLib launch the entry: it honours Terminal=true, Path=, D-Bus
             // activation and the Exec field codes, none of which a hand-built argv does,

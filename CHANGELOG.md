@@ -7,6 +7,14 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Dock icon interactions.** Middle-click an app icon to open a new window. Scroll over an app
+  with several windows to switch between them (scroll down for the next, up for the previous).
+  Click the icon of the focused app to minimize it; Settings, Behavior, Minimize on click turns
+  that off. On the media widget, scroll changes the volume (a short "Volume 60%" label shows
+  it) and middle-click plays or pauses.
+- **Drop files on an app icon to open them with it.** Dragging a file over an app that takes
+  files enlarges its icon; dropping opens the file in that app. Dragging a file over the
+  dock no longer opens a pin gap, which is now only for `.desktop` files.
 - **The media widget follows the player that is playing.** With several MPRIS players open, a
   player that is playing wins over the fixed priority list, and the widget stays with it until
   another player starts. Pausing does not hand the widget to a different player.

@@ -216,6 +216,17 @@ namespace Dokku {
             save();
         }
 
+        // Clicking the icon of the app that has focus minimizes it
+        public bool get_minimize_on_click() {
+            try { return keyfile.get_boolean("Dock", "minimize_on_click"); }
+            catch (Error e) { return true; }
+        }
+
+        public void set_minimize_on_click(bool enabled) {
+            keyfile.set_boolean("Dock", "minimize_on_click", enabled);
+            save();
+        }
+
         // Players the media widget ignores, matched against the MPRIS bus name
         public string[] get_media_blocked_players() {
             try { return keyfile.get_string_list("Media", "blocked_players"); }
