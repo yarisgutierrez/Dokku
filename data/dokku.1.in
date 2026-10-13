@@ -64,7 +64,16 @@ theme=default
 
 [Plugins]
 enabled=trash;show-desktop
+
+[Media]
+blocked_players=firefox;chromium;chrome
 .fi
+.PP
+The media widget follows the MPRIS2 player that is playing, and keeps it until
+another player starts. Players whose D-Bus name contains a word in
+.B blocked_players
+are ignored. The default list covers common web browsers. An empty list ignores
+nothing. The same list is under Settings, Behavior, Ignored players.
 .SH THEME FORMAT
 Themes use INI format with the following sections:
 .PP

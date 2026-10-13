@@ -1912,6 +1912,10 @@ namespace Dokku {
 
         public void reload_settings() {
             config.reload();
+            var media_plugin = plugin_manager.get_plugin("media-player") as MediaPlugin;
+            if (media_plugin != null) {
+                media_plugin.set_blocked_players(config.get_media_blocked_players());
+            }
             dock_position = config.get_position();
             is_vertical = (dock_position == "left" || dock_position == "right");
             renderer.icon_size = config.get_icon_size();

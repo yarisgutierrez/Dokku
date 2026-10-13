@@ -41,6 +41,7 @@ libdokku_sources = files(
   'plugins/plugin-manager.vala',
   'plugins/script-plugin.vala',
   'plugins/trash-plugin.vala',
+  'plugins/media-player-picker.vala',
   'plugins/media-plugin.vala',
   'plugins/show-desktop-plugin.vala',
   'plugins/separator-plugin.vala',

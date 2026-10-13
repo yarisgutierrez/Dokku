@@ -17,7 +17,7 @@ namespace Dokku {
             register_plugin(new TrashPlugin());
             register_plugin(new ShowDesktopPlugin());
             register_plugin(new SeparatorPlugin());
-            register_plugin(new MediaPlugin());
+            register_plugin(new MediaPlugin(config.get_media_blocked_players()));
         }
 
         private void load_user_plugins() {

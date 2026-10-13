@@ -466,6 +466,32 @@ namespace Dokku {
             });
             items_grid.attach(media_switch, 1, row++, 1, 1);
 
+            // Players the media widget ignores
+            items_grid.attach(make_setting_label("Ignored players",
+                "Media players to skip, separated by commas. Matches part of the player's name"), 0, row, 1, 1);
+            var blocked_entry = new Gtk.Entry();
+            blocked_entry.text = string.joinv(", ", config.get_media_blocked_players());
+            blocked_entry.width_chars = 28;
+            blocked_entry.halign = Gtk.Align.START;
+            blocked_entry.valign = Gtk.Align.CENTER;
+            string saved_blocked = blocked_entry.text;
+            // Saved when the entry is left or Enter is pressed, not on every key
+            SourceFunc commit_blocked = () => {
+                if (blocked_entry.text == saved_blocked) return Source.REMOVE;
+                saved_blocked = blocked_entry.text;
+                string[] players = {};
+                foreach (var part in blocked_entry.text.split(",")) {
+                    var word = part.strip();
+                    if (word != "") players += word;
+                }
+                config.set_media_blocked_players(players);
+                schedule_apply();
+                return Source.REMOVE;
+            };
+            blocked_entry.activate.connect(() => { commit_blocked(); });
+            blocked_entry.focus_out_event.connect(() => { commit_blocked(); return false; });
+            items_grid.attach(blocked_entry, 1, row++, 1, 1);
+
             // Notification badges
             items_grid.attach(make_setting_label("Notification badges", "Show unread count on app icons"), 0, row, 1, 1);
             var badge_switch = new Gtk.Switch();

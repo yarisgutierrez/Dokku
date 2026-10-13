@@ -7,6 +7,11 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **The media widget follows the player that is playing.** With several MPRIS players open, a
+  player that is playing wins over the fixed priority list, and the widget stays with it until
+  another player starts. Pausing does not hand the widget to a different player.
+- **Ignored players setting.** Settings, Behavior, Ignored players (or `[Media] blocked_players`
+  in `config.ini`) lists the players the media widget skips. It takes effect without a restart.
 - **Now-playing popup with a seek bar.** Resting the pointer on the media widget for 0.6 s, or clicking
   its art or text, opens a card with the album art, song, artist, album, the player's logo,
   elapsed and total time, a seek bar you can click or drag, and previous, play/pause and next.

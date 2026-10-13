@@ -216,6 +216,17 @@ namespace Dokku {
             save();
         }
 
+        // Players the media widget ignores, matched against the MPRIS bus name
+        public string[] get_media_blocked_players() {
+            try { return keyfile.get_string_list("Media", "blocked_players"); }
+            catch (Error e) { return MediaPlayerPicker.DEFAULT_BLOCKED; }
+        }
+
+        public void set_media_blocked_players(string[] players) {
+            keyfile.set_string_list("Media", "blocked_players", players);
+            save();
+        }
+
         public bool get_plugin_enabled(string plugin_id) {
             try {
                 return keyfile.get_boolean("Plugins", plugin_id);
