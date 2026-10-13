@@ -7,6 +7,10 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Back up and restore your settings.** Settings, Behavior, Backup has Export (save
+  `config.ini` to a file), Import (load one back) and Reset (back to the defaults). Import
+  refuses a file that is too large, not settings, or has a value of the wrong kind, and
+  changes nothing when it does. Import and Reset keep what they replace as `config.ini.bak`.
 - **Launcher quick results.** Typing a calculation such as `2+3*4` or `sqrt(16)+1` shows the
   answer, and Enter (or a click) copies it. Matching recent files appear as rows you can open.
   When nothing in the grid matches, a "Search the web" row opens the words in your browser.

@@ -45,6 +45,9 @@ Installable themes for dock customization. Themes are stored in
 .I ~/.config/dokku/config.ini
 User configuration file containing pinned apps, dock settings, and enabled plugins.
 .TP
+.I ~/.config/dokku/config.ini.bak
+The settings that the last Import or Reset replaced.
+.TP
 .I ~/.local/share/dokku/themes/
 User-installed themes directory.
 .TP

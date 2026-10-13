@@ -5,6 +5,7 @@ namespace Dokku {
         private ThemeManager theme_manager;
         private PluginManager plugin_manager;
         private Gtk.ComboBoxText theme_combo;
+        private Gtk.Notebook? notebook = null;
         public signal void settings_changed();
 
         // Debounce timer for live apply
@@ -155,7 +156,11 @@ namespace Dokku {
 
             set_titlebar(header);
 
-            var notebook = new Gtk.Notebook();
+            build_notebook();
+        }
+
+        private void build_notebook() {
+            notebook = new Gtk.Notebook();
             notebook.margin = 12;
 
             notebook.append_page(create_appearance_tab(), new Gtk.Label("Appearance"));
@@ -163,6 +168,16 @@ namespace Dokku {
             notebook.append_page(create_shortcuts_tab(), new Gtk.Label("Shortcuts"));
 
             add(notebook);
+        }
+
+        // After the settings are replaced from outside the controls, build them again so
+        // they show the new values. The tab being looked at stays.
+        private void rebuild_ui() {
+            int page = notebook != null ? notebook.page : 0;
+            if (notebook != null) remove(notebook);
+            build_notebook();
+            notebook.show_all();
+            notebook.page = page;
         }
 
         // --- Appearance Tab ---
@@ -643,8 +658,129 @@ namespace Dokku {
             launcher_card.pack_start(launcher_grid, true, true, 0);
             outer.pack_start(launcher_card, false, false, 0);
 
+            // --- Backup section ---
+            outer.pack_start(make_section_header("Backup", false), false, false, 0);
+
+            var backup_card = make_card();
+            var backup_grid = make_card_grid();
+            backup_grid.attach(make_setting_label("Settings file",
+                "Save your settings, pinned apps and folders to a file, or load them back"), 0, 0, 1, 1);
+            var backup_buttons = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
+            backup_buttons.halign = Gtk.Align.END;
+            backup_buttons.valign = Gtk.Align.CENTER;
+            var export_btn = new Gtk.Button.with_label("Export...");
+            export_btn.clicked.connect(on_export_settings);
+            var import_btn = new Gtk.Button.with_label("Import...");
+            import_btn.clicked.connect(on_import_settings);
+            var reset_btn = new Gtk.Button.with_label("Reset...");
+            reset_btn.get_style_context().add_class("destructive-action");
+            reset_btn.clicked.connect(on_reset_settings);
+            backup_buttons.pack_start(export_btn, false, false, 0);
+            backup_buttons.pack_start(import_btn, false, false, 0);
+            backup_buttons.pack_start(reset_btn, false, false, 0);
+            backup_grid.attach(backup_buttons, 1, 0, 1, 1);
+            backup_card.pack_start(backup_grid, true, true, 0);
+            outer.pack_start(backup_card, false, false, 0);
+
             scroll.add(outer);
             return scroll;
+        }
+
+        // --- Export, import and reset ---
+
+        private void tell(Gtk.MessageType type, string text, string? detail = null) {
+            var box = new Gtk.MessageDialog(this, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                                            type, Gtk.ButtonsType.OK, "%s", text);
+            if (detail != null) box.secondary_text = detail;
+            box.run();
+            box.destroy();
+        }
+
+        private bool confirm(string text, string detail, string action, bool destructive) {
+            var box = new Gtk.MessageDialog(this, Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+                                            Gtk.MessageType.QUESTION, Gtk.ButtonsType.NONE, "%s", text);
+            box.secondary_text = detail;
+            box.add_button("_Cancel", Gtk.ResponseType.CANCEL);
+            var go = box.add_button(action, Gtk.ResponseType.ACCEPT);
+            if (destructive) {
+                // Enter must not be able to throw settings away
+                go.get_style_context().add_class("destructive-action");
+                box.set_default_response(Gtk.ResponseType.CANCEL);
+            } else {
+                box.set_default_response(Gtk.ResponseType.ACCEPT);
+            }
+            bool accepted = box.run() == Gtk.ResponseType.ACCEPT;
+            box.destroy();
+            return accepted;
+        }
+
+        private void on_export_settings() {
+            var dialog = new Gtk.FileChooserDialog(
+                "Export Settings", this, Gtk.FileChooserAction.SAVE,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_Save", Gtk.ResponseType.ACCEPT
+            );
+            dialog.do_overwrite_confirmation = true;
+            dialog.set_current_name("dokku-settings.ini");
+            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
+                string path = dialog.get_filename();
+                dialog.destroy();
+                try {
+                    config.export_to(path);
+                    tell(Gtk.MessageType.INFO, "Settings exported", path);
+                } catch (Error e) {
+                    tell(Gtk.MessageType.ERROR, "Could not save the settings", e.message);
+                }
+                return;
+            }
+            dialog.destroy();
+        }
+
+        private void on_import_settings() {
+            var dialog = new Gtk.FileChooserDialog(
+                "Import Settings", this, Gtk.FileChooserAction.OPEN,
+                "_Cancel", Gtk.ResponseType.CANCEL,
+                "_Open", Gtk.ResponseType.ACCEPT
+            );
+            var filter = new Gtk.FileFilter();
+            filter.set_filter_name("Settings files (*.ini)");
+            filter.add_pattern("*.ini");
+            dialog.add_filter(filter);
+            if (dialog.run() != Gtk.ResponseType.ACCEPT) {
+                dialog.destroy();
+                return;
+            }
+            string path = dialog.get_filename();
+            dialog.destroy();
+
+            if (!confirm("Replace your settings with this file?",
+                         "A copy of your current settings is kept as config.ini.bak. " +
+                         "Only import files you trust: settings can include launcher shortcuts that run commands.",
+                         "_Import", false)) {
+                return;
+            }
+            try {
+                config.import_from(path);
+            } catch (Error e) {
+                tell(Gtk.MessageType.ERROR, "Could not import the settings", e.message);
+                return;
+            }
+            settings_changed();
+            rebuild_ui();
+            tell(Gtk.MessageType.INFO, "Settings imported");
+        }
+
+        private void on_reset_settings() {
+            if (!confirm("Reset all settings to the defaults?",
+                         "Pinned apps, folders, shortcuts and other settings go back to how a fresh install starts. " +
+                         "A copy of your current settings is kept as config.ini.bak.",
+                         "_Reset", true)) {
+                return;
+            }
+            config.reset_to_defaults();
+            settings_changed();
+            rebuild_ui();
+            tell(Gtk.MessageType.INFO, "Settings reset to the defaults");
         }
 
         private void on_install_plugin() {

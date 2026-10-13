@@ -24,6 +24,7 @@ Wayland. Written in Vala (GTK3, Cairo).
 - **Frosted glass** blur via a compositor such as picom (X11)
 - **Launcher:** full-screen app grid with search and keyboard navigation; the search box also
   calculates (`2+3*4`), finds recent files and can search the web
+- **Backup:** export, import and reset your settings from the Settings window
 - **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
 - **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
 
@@ -116,6 +117,7 @@ rm -r ~/.config/dokku ~/.local/share/dokku
 | Path | Purpose |
 |------|---------|
 | `~/.config/dokku/config.ini` | settings, pinned apps, folders, enabled plugins |
+| `~/.config/dokku/config.ini.bak` | what the last Import or Reset replaced |
 | `~/.local/share/dokku/themes/` | user-installed themes |
 | `~/.local/share/dokku/plugins/` | user script plugins |
 
