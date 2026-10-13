@@ -6,7 +6,11 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-13
+
 ### Added
+- **`DOKKU_TIMING=1`** logs the launcher's open and fade timings to the terminal, for
+  tracking down lag. It does nothing unless set.
 - **Drag files onto the Trash.** Dropping files or folders on the Trash icon moves them to the
   Trash (through `gio trash`, so Restore and Undo in the file manager work). The icon enlarges
   as the drop target, turns "full" afterwards, and a message explains when something can't be
@@ -119,8 +123,6 @@ All notable changes to Dokku are listed here. The format follows
   `_DOKKU_WINDOW`, so picom rules for Dokku windows (no shadow) apply to it. With picom
   `fading = true`, add `fade = false;` to the Dokku rule (see the README).
 - **Launcher opens faster the first time.** Its widgets are built shortly after startup.
-- **`DOKKU_TIMING=1`** logs the launcher's open and fade timings to the terminal, for
-  tracking down lag.
 - Apps launched from Dokku inherited the directory Dokku was started from, so a file
   manager such as Thunar opened there instead of in your home directory. Dokku now
   switches to your home directory at startup.
@@ -220,6 +222,7 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
-[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yarisgutierrez/Dokku/releases/tag/v0.2.0

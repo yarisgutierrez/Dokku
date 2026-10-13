@@ -1,5 +1,5 @@
 project('dokku', 'vala', 'c',
-  version: '0.2.1',
+  version: '0.3.0',
   meson_version: '>= 0.53.0',
 )
 
