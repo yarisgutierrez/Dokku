@@ -1,7 +1,6 @@
 namespace Dokku {
     public class HotkeyManager : Object {
         private ConfigManager config;
-        private LauncherWindow launcher;
         private AppManager app_manager;
         private UsageTracker usage_tracker;
         private Wnck.Screen screen;
@@ -16,10 +15,10 @@ namespace Dokku {
         private const int64 SUPER_TAP_THRESHOLD_US = 400000; // 400ms
 
         public signal void hotkey_error(string message);
+        public signal void launcher_toggle_requested();
 
-        public HotkeyManager(ConfigManager config, LauncherWindow launcher, AppManager app_manager, UsageTracker usage_tracker) {
+        public HotkeyManager(ConfigManager config, AppManager app_manager, UsageTracker usage_tracker) {
             this.config = config;
-            this.launcher = launcher;
             this.app_manager = app_manager;
             this.usage_tracker = usage_tracker;
             this.registered_hotkeys = new HashTable<string, string>(str_hash, str_equal);
@@ -84,7 +83,7 @@ namespace Dokku {
                         // Short tap, no combo — toggle launcher from idle
                         // to avoid reentrancy with X event processing
                         Idle.add(() => {
-                            launcher.toggle();
+                            launcher_toggle_requested();
                             return false;
                         });
                     }
@@ -198,7 +197,7 @@ namespace Dokku {
             if (cached_super_target != 0) {
                 return;
             }
-            launcher.toggle();
+            launcher_toggle_requested();
         }
 
         private void handle_app_hotkey(int slot) {

@@ -1,19 +1,22 @@
 namespace Dokku {
+    // The launcher and settings windows are built on first use, not at startup
+    public delegate LauncherWindow LauncherProvider();
+    public delegate SettingsWindow SettingsProvider();
 
     [DBus (name = "org.dokku.Dock")]
     public class DBusService : Object {
         private DockWindow dock;
-        private LauncherWindow launcher;
-        private SettingsWindow settings;
+        private LauncherProvider get_launcher;
+        private SettingsProvider get_settings;
         private ConfigManager config;
         private AppManager app_manager;
 
-        public DBusService(DockWindow dock, LauncherWindow launcher,
-                           SettingsWindow settings, ConfigManager config,
+        public DBusService(DockWindow dock, owned LauncherProvider get_launcher,
+                           owned SettingsProvider get_settings, ConfigManager config,
                            AppManager app_manager) {
             this.dock = dock;
-            this.launcher = launcher;
-            this.settings = settings;
+            this.get_launcher = (owned) get_launcher;
+            this.get_settings = (owned) get_settings;
             this.config = config;
             this.app_manager = app_manager;
         }
@@ -30,19 +33,21 @@ namespace Dokku {
         public signal void reload_requested();
 
         public void toggle_launcher() throws DBusError, IOError {
-            launcher.toggle();
+            get_launcher().toggle();
         }
 
         public void show_launcher() throws DBusError, IOError {
+            var launcher = get_launcher();
             if (!launcher.visible) launcher.toggle();
         }
 
         public void hide_launcher() throws DBusError, IOError {
+            var launcher = get_launcher();
             if (launcher.visible) launcher.toggle();
         }
 
         public void show_settings() throws DBusError, IOError {
-            settings.show_all();
+            get_settings().show_all();
         }
 
         public bool launch_app(string app_id) throws DBusError, IOError {

@@ -2,8 +2,10 @@ namespace Dokku {
     public class Application : Gtk.Application {
         private DockWindow dock;
         private List<DockWindow> extra_docks;
-        private LauncherWindow launcher;
-        private SettingsWindow settings;
+        // Built on first use: most sessions never open either, and each holds a
+        // sizeable widget tree (the launcher also every app icon)
+        private LauncherWindow? launcher = null;
+        private SettingsWindow? settings = null;
         private AppManager app_manager;
         private ConfigManager config;
         private HotkeyManager hotkey_manager;
@@ -73,14 +75,7 @@ namespace Dokku {
 
         protected override void activate() {
             if (dock != null) {
-                if (show_launcher) {
-                    launcher.toggle();
-                    show_launcher = false;
-                }
-                if (show_settings) {
-                    settings.show_all();
-                    show_settings = false;
-                }
+                open_requested_windows();
                 dock.present();
                 return;
             }
@@ -90,35 +85,20 @@ namespace Dokku {
             usage_tracker = new UsageTracker(config);
             extra_docks = new List<DockWindow>();
             dock = new DockWindow(this, app_manager, config, usage_tracker);
-            launcher = new LauncherWindow(app_manager, config, usage_tracker);
-            settings = new SettingsWindow(config, app_manager);
 
-            dock.launcher_requested.connect(() => {
-                launcher.toggle();
-            });
-            launcher.pin_to_dock_requested.connect((app_id, desktop_file) => {
-                var pinned = config.get_pinned_apps();
-                foreach (var p in pinned) {
-                    if (p == app_id || p == desktop_file) return;
-                }
-                string[] new_pinned = pinned;
-                new_pinned += (desktop_file != "" ? desktop_file : app_id);
-                config.set_pinned_apps(new_pinned);
-                dock.reload_settings();
-            });
-            dock.settings_requested.connect(() => settings.show_all());
-            settings.settings_changed.connect(() => apply_settings());
-            settings.delete_event.connect(() => { settings.hide(); return true; });
+            dock.launcher_requested.connect(() => get_launcher().toggle());
+            dock.settings_requested.connect(() => get_settings().show_all());
 
             app_manager.apps_changed.connect(() => {
-                launcher.refresh_apps();
+                if (launcher != null) launcher.refresh_apps();
                 dock.reload_settings();
             });
 
             var caps = Capabilities.current;
             message("Session: %s", caps.describe());
             if (caps.supports(Feature.GLOBAL_HOTKEYS)) {
-                hotkey_manager = new HotkeyManager(config, launcher, app_manager, usage_tracker);
+                hotkey_manager = new HotkeyManager(config, app_manager, usage_tracker);
+                hotkey_manager.launcher_toggle_requested.connect(() => get_launcher().toggle());
                 hotkey_manager.hotkey_error.connect((message) => {
                     warning("Hotkey error: %s", message);
                     var notification = new Notification("Dokku Hotkey Error");
@@ -135,12 +115,9 @@ namespace Dokku {
 
             // Register D-Bus service for external control
             if (dbus_service == null) {
-                dbus_service = new DBusService(dock, launcher, settings, config, app_manager);
-                settings.settings_changed.connect(() => dbus_service.settings_changed());
+                dbus_service = new DBusService(dock, get_launcher, get_settings, config, app_manager);
                 // `Reload` over D-Bus does what changing a setting does
                 dbus_service.reload_requested.connect(() => apply_settings());
-                launcher.show.connect(() => dbus_service.launcher_toggled(true));
-                launcher.hide.connect(() => dbus_service.launcher_toggled(false));
 
                 dbus_owner_id = Bus.own_name(BusType.SESSION, "org.dokku.Dock",
                     BusNameOwnerFlags.NONE,
@@ -168,13 +145,49 @@ namespace Dokku {
             display.monitor_added.connect(() => schedule_monitor_sync());
             display.monitor_removed.connect(() => schedule_monitor_sync());
 
+            open_requested_windows();
+        }
+
+        private LauncherWindow get_launcher() {
+            if (launcher == null) {
+                launcher = new LauncherWindow(app_manager, config, usage_tracker);
+                launcher.pin_to_dock_requested.connect((app_id, desktop_file) => {
+                    var pinned = config.get_pinned_apps();
+                    foreach (var p in pinned) {
+                        if (p == app_id || p == desktop_file) return;
+                    }
+                    string[] new_pinned = pinned;
+                    new_pinned += (desktop_file != "" ? desktop_file : app_id);
+                    config.set_pinned_apps(new_pinned);
+                    dock.reload_settings();
+                });
+                launcher.show.connect(() => dbus_service.launcher_toggled(true));
+                launcher.hide.connect(() => dbus_service.launcher_toggled(false));
+            }
+            return launcher;
+        }
+
+        private SettingsWindow get_settings() {
+            if (settings == null) {
+                settings = new SettingsWindow(config, app_manager);
+                settings.settings_changed.connect(() => {
+                    apply_settings();
+                    dbus_service.settings_changed();
+                });
+                settings.delete_event.connect(() => { settings.hide(); return true; });
+            }
+            return settings;
+        }
+
+        // --launcher and --settings, once the windows can be built
+        private void open_requested_windows() {
             if (show_launcher) {
-                launcher.toggle();
                 show_launcher = false;
+                get_launcher().toggle();
             }
             if (show_settings) {
-                settings.show_all();
                 show_settings = false;
+                get_settings().show_all();
             }
         }
 
@@ -197,7 +210,7 @@ namespace Dokku {
                 extra.reload_settings();
             }
             sync_multi_monitor();
-            launcher.mark_dirty();
+            if (launcher != null) launcher.mark_dirty();
             if (hotkey_manager != null) {
                 hotkey_manager.reload_hotkeys();
             }
@@ -262,8 +275,8 @@ namespace Dokku {
                 if (!already_has) {
                     var extra = new DockWindow(this, app_manager, config, usage_tracker);
                     extra.set_target_monitor(mon);
-                    extra.launcher_requested.connect(() => launcher.toggle());
-                    extra.settings_requested.connect(() => settings.show_all());
+                    extra.launcher_requested.connect(() => get_launcher().toggle());
+                    extra.settings_requested.connect(() => get_settings().show_all());
                     extra.show_all();
                     extra.present();
                     extra_docks.append(extra);
