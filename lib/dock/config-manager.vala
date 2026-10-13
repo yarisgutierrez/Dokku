@@ -250,6 +250,18 @@ namespace Dokku {
             keyfile.set_boolean("Plugins", plugin_id, enabled);
             save();
         }
+        // Where the launcher's "search the web" row goes; %s stands for the words.
+        // Empty turns the row off.
+        public string get_web_search_url() {
+            try { return keyfile.get_string("Launcher", "web_search_url"); }
+            catch (Error e) { return QuickResults.DEFAULT_WEB_SEARCH; }
+        }
+
+        public void set_web_search_url(string url) {
+            keyfile.set_string("Launcher", "web_search_url", url);
+            save();
+        }
+
         public bool get_launcher_fade() {
             try { return keyfile.get_boolean("Launcher", "fade_effect"); }
             catch (Error e) { return true; }

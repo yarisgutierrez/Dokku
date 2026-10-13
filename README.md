@@ -22,7 +22,8 @@ Wayland. Written in Vala (GTK3, Cairo).
   middle-click to play or pause. It follows the player that is playing, and Settings can
   list players to ignore
 - **Frosted glass** blur via a compositor such as picom (X11)
-- **Launcher:** full-screen app grid with search and keyboard navigation
+- **Launcher:** full-screen app grid with search and keyboard navigation; the search box also
+  calculates (`2+3*4`), finds recent files and can search the web
 - **Plugins:** built-in Trash, Show Desktop and Separator, plus user scripts
 - **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
 

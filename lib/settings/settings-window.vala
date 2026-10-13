@@ -614,6 +614,32 @@ namespace Dokku {
             });
             launcher_grid.attach(group_switch, 1, row++, 1, 1);
 
+            // Web search address
+            launcher_grid.attach(make_setting_label("Web search",
+                "Where the launcher's search the web row goes. %s stands for the search words. Empty turns the row off"), 0, row, 1, 1);
+            var web_entry = new Gtk.Entry();
+            web_entry.text = config.get_web_search_url();
+            web_entry.width_chars = 30;
+            web_entry.halign = Gtk.Align.START;
+            web_entry.valign = Gtk.Align.CENTER;
+            string saved_web = web_entry.text;
+            SourceFunc commit_web = () => {
+                string url = web_entry.text.strip();
+                if (url == saved_web) return Source.REMOVE;
+                // Only an empty value or an http(s) address with %s is kept
+                if (url != "" && QuickResults.web_search_uri(url, "x") == null) {
+                    web_entry.text = saved_web;
+                    return Source.REMOVE;
+                }
+                saved_web = url;
+                config.set_web_search_url(url);
+                schedule_apply();
+                return Source.REMOVE;
+            };
+            web_entry.activate.connect(() => { commit_web(); });
+            web_entry.focus_out_event.connect(() => { commit_web(); return false; });
+            launcher_grid.attach(web_entry, 1, row++, 1, 1);
+
             launcher_card.pack_start(launcher_grid, true, true, 0);
             outer.pack_start(launcher_card, false, false, 0);
 

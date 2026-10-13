@@ -51,6 +51,10 @@ namespace Dokku {
         private const int GROUP_MIN_APPS = 3;
         private static bool css_applied = false;
 
+        // Rows under the search box for calculations, recent files and web search
+        private Gtk.Box quick_box;
+        private const int QUICK_RECENT_MAX = 3;
+
         // Fade animation (frame-clock driven)
         private uint fade_tick_id = 0;
         private bool fading_out = false;
@@ -191,6 +195,12 @@ namespace Dokku {
             build_category_buttons();
             main_box.pack_start(category_bar, false, false, 0);
 
+            quick_box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
+            quick_box.halign = Gtk.Align.CENTER;
+            quick_box.no_show_all = true;
+            quick_box.visible = false;
+            main_box.pack_start(quick_box, false, false, 0);
+
             // Page stack (horizontal slide transitions)
             page_stack = new Gtk.Stack();
             page_stack.transition_type = Gtk.StackTransitionType.SLIDE_LEFT_RIGHT;
@@ -236,6 +246,19 @@ namespace Dokku {
                         border: 1px solid rgba(255,255,255,0.20);
                         color: white;
                     }
+                    .quick-row {
+                        padding: 8px 14px;
+                        border-radius: 10px;
+                        background: rgba(255,255,255,0.07);
+                        border: 1px solid rgba(255,255,255,0.10);
+                        box-shadow: none;
+                        color: white;
+                    }
+                    .quick-row:hover, .quick-row:focus {
+                        background: rgba(255,255,255,0.16);
+                    }
+                    .quick-row label { color: white; }
+                    .quick-row .quick-secondary { color: rgba(255,255,255,0.55); font-size: 11px; }
                     .app-item {
                         padding: 10px;
                         border-radius: 14px;
@@ -439,6 +462,134 @@ namespace Dokku {
             }
             current_page = 0;
             rebuild_pages();
+            update_quick_results();
+        }
+
+        private void clear_quick_results() {
+            quick_box.foreach((w) => quick_box.remove(w));
+            quick_box.visible = false;
+        }
+
+        private Gtk.Button make_quick_row(Gtk.Widget icon, string primary, string secondary) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+            btn.get_style_context().add_class("quick-row");
+            btn.width_request = 480;
+            var box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 12);
+            box.pack_start(icon, false, false, 0);
+            var texts = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
+            var first = new Gtk.Label(primary);
+            first.halign = Gtk.Align.START;
+            first.xalign = 0;
+            first.ellipsize = Pango.EllipsizeMode.END;
+            texts.pack_start(first, false, false, 0);
+            if (secondary != "") {
+                var second = new Gtk.Label(secondary);
+                second.halign = Gtk.Align.START;
+                second.xalign = 0;
+                second.ellipsize = Pango.EllipsizeMode.MIDDLE;
+                second.get_style_context().add_class("quick-secondary");
+                texts.pack_start(second, false, false, 0);
+            }
+            box.pack_start(texts, true, true, 0);
+            btn.add(box);
+            return btn;
+        }
+
+        // A calculation, matching recent files, or a web search, shown above the grid
+        private void update_quick_results() {
+            clear_quick_results();
+            string text = search_entry.text.strip();
+            if (text == "") return;
+
+            double value;
+            bool is_calc = QuickMath.evaluate(text, out value);
+            if (is_calc) {
+                string result = QuickMath.format(value);
+                var row = make_quick_row(
+                    new Gtk.Image.from_icon_name("accessories-calculator-symbolic", Gtk.IconSize.LARGE_TOOLBAR),
+                    "= " + result, "Press Enter to copy the result");
+                row.clicked.connect(() => {
+                    var clipboard = Gtk.Clipboard.get_default(get_display());
+                    clipboard.set_text(result, -1);
+                    clipboard.store();
+                    fade_hide();
+                });
+                quick_box.pack_start(row, false, false, 0);
+            }
+
+            if (text.length >= 2 && !is_calc) {
+                foreach (var info in find_recent_files(text)) {
+                    string uri = info.get_uri();
+                    string folder = "";
+                    try {
+                        folder = Path.get_dirname(Filename.from_uri(uri)).replace(Environment.get_home_dir(), "~");
+                    } catch (Error e) {}
+                    var gicon = info.get_gicon();
+                    Gtk.Widget icon = gicon != null
+                        ? (Gtk.Widget) new Gtk.Image.from_gicon(gicon, Gtk.IconSize.LARGE_TOOLBAR)
+                        : (Gtk.Widget) new Gtk.Image.from_icon_name("text-x-generic", Gtk.IconSize.LARGE_TOOLBAR);
+                    var row = make_quick_row(icon, TextUtil.sanitize(info.get_display_name()), folder);
+                    row.clicked.connect(() => {
+                        try {
+                            Gtk.show_uri_on_window(this, uri, Gdk.CURRENT_TIME);
+                        } catch (Error e) {
+                            warning("Failed to open %s: %s", uri, e.message);
+                        }
+                        fade_hide();
+                    });
+                    quick_box.pack_start(row, false, false, 0);
+                }
+            }
+
+            // Only when nothing in the grid matches: the words may be for a browser
+            if (!is_calc && ordered_items.length() == 0) {
+                string? web = QuickResults.web_search_uri(config.get_web_search_url(), text);
+                if (web != null) {
+                    var row = make_quick_row(
+                        new Gtk.Image.from_icon_name("system-search-symbolic", Gtk.IconSize.LARGE_TOOLBAR),
+                        "Search the web for “%s”".printf(TextUtil.sanitize(text)),
+                        "Press Enter to open your browser");
+                    row.clicked.connect(() => {
+                        try {
+                            Gtk.show_uri_on_window(this, web, Gdk.CURRENT_TIME);
+                        } catch (Error e) {
+                            warning("Failed to open the browser: %s", e.message);
+                        }
+                        fade_hide();
+                    });
+                    quick_box.pack_start(row, false, false, 0);
+                }
+            }
+
+            if (quick_box.get_children() != null) {
+                // no_show_all keeps show_all() out of the box, so show the rows themselves
+                quick_box.foreach((row) => row.show_all());
+                quick_box.show();
+            }
+        }
+
+        // Recent files whose names match every word typed, newest first
+        private List<Gtk.RecentInfo> find_recent_files(string text) {
+            var matches = new List<Gtk.RecentInfo>();
+            foreach (var info in Gtk.RecentManager.get_default().get_items()) {
+                if (!info.is_local()) continue;
+                if (!QuickResults.name_matches(info.get_display_name(), text)) continue;
+                matches.append(info);
+            }
+            matches.sort((a, b) => {
+                long at = (long) a.get_modified();
+                long bt = (long) b.get_modified();
+                return at > bt ? -1 : (at < bt ? 1 : 0);
+            });
+            // The files can be gone; check only the few that would be shown
+            var shown = new List<Gtk.RecentInfo>();
+            foreach (var info in matches) {
+                if (!info.exists()) continue;
+                shown.append(info);
+                if (shown.length() >= QUICK_RECENT_MAX) break;
+            }
+            return shown;
         }
 
         // Full rebuild of all pages (no animation — used on search/init)
@@ -1555,6 +1706,14 @@ namespace Dokku {
                 return true;
             }
             if (event.keyval == Gdk.Key.Return || event.keyval == Gdk.Key.KP_Enter) {
+                // Nothing in the grid matches, but a calculation, file or web search does
+                if (!on_item && search_entry.text != "" && ordered_items.length() == 0) {
+                    var rows = quick_box.get_children();
+                    if (rows != null) {
+                        ((Gtk.Button) rows.data).clicked();
+                        return true;
+                    }
+                }
                 // With an icon focused, Enter activates that icon instead
                 if (!on_item && search_entry.text != "" && ordered_items.length() > 0) {
                     string first = ordered_items.nth_data(0);
@@ -1697,6 +1856,7 @@ namespace Dokku {
                 fade_hide();
             } else {
                 search_entry.text = "";
+                clear_quick_results();
                 // Pages should already be pre-built via idle; fallback sync if not
                 if (pages_dirty) {
                     if (rebuild_idle_id != 0) {

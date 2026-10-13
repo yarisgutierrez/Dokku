@@ -7,6 +7,12 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Launcher quick results.** Typing a calculation such as `2+3*4` or `sqrt(16)+1` shows the
+  answer, and Enter (or a click) copies it. Matching recent files appear as rows you can open.
+  When nothing in the grid matches, a "Search the web" row opens the words in your browser.
+  The address is set under Settings, Behavior, Web search (`[Launcher] web_search_url`, with
+  `%s` for the search words); leave it empty to turn the row off. Nothing is sent anywhere
+  until you choose the row.
 - **Dock icon interactions.** Middle-click an app icon to open a new window. Scroll over an app
   with several windows to switch between them (scroll down for the next, up for the previous).
   Click the icon of the focused app to minimize it; Settings, Behavior, Minimize on click turns

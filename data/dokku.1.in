@@ -67,6 +67,9 @@ enabled=trash;show-desktop
 
 [Media]
 blocked_players=firefox;chromium;chrome
+
+[Launcher]
+web_search_url=https://duckduckgo.com/?q=%s
 .fi
 .PP
 The media widget follows the MPRIS2 player that is playing, and keeps it until
@@ -74,6 +77,12 @@ another player starts. Players whose D-Bus name contains a word in
 .B blocked_players
 are ignored. The default list covers common web browsers. An empty list ignores
 nothing. The same list is under Settings, Behavior, Ignored players.
+.PP
+In the launcher's search box, a calculation such as 2+3*4 shows its answer and
+recent files that match are listed. When no app matches, a row searches the web
+at
+.B web_search_url
+(%s stands for the search words; an empty value turns the row off).
 .SH THEME FORMAT
 Themes use INI format with the following sections:
 .PP

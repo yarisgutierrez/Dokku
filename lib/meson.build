@@ -34,6 +34,7 @@ libdokku_sources = files(
   'dock/config-manager.vala',
   'dock/notification-monitor.vala',
   'dock/progress-monitor.vala',
+  'launcher/quick-results.vala',
   'launcher/launcher-window.vala',
   'launcher/usage-tracker.vala',
   'settings/settings-window.vala',
