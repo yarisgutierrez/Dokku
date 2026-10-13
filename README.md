@@ -239,6 +239,27 @@ properties so compositor rules can target its windows:
 
 `_COMPTON_SHADOW` is set to 0 so picom draws no shadow.
 
+**picom blurs every window once `blur-method` is set.** In picom v13, setting `blur-method`
+(for example `dual_kawase`) turns background blur on for all windows by default, not only
+the ones your rules name. Menus and other popups are windows with a transparent margin
+around them (room for their shadow), and the blur covers the whole window, margin
+included, so each menu gets a blurred box around it. The `xrender` backend does not
+support `dual_kawase`, so it blurs nothing and shows no box, which is why the problem
+appears only with the GL backends. Keep blur for the dock and switch it off for menus:
+
+```
+rules: ({
+  match = "window_type = 'popup_menu' || window_type = 'dropdown_menu' || window_type = 'menu'";
+  blur-background = false;
+}, {
+  match = "_DOKKU_WINDOW@ && _DOKKU_BLUR@";
+  blur-background = true;
+}, ...)
+```
+
+To blur only the dock's backdrop, put a first rule `{ match = "!_DOKKU_BLUR@"; blur-background = false; }`
+instead.
+
 **picom and the launcher fade:** on X11 the launcher fades in and out by changing the
 window's `_NET_WM_WINDOW_OPACITY`, so the compositor does the blending. If picom has
 `fading = true`, it also smooths those changes at its own pace, and the launcher
