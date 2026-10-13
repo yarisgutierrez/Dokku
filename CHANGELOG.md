@@ -59,6 +59,14 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **Launcher fade-out stuttered under picom.** The fade repainted the whole fullscreen window
+  every frame, which picom's GL backend could not keep up with. On X11 the launcher now fades
+  through `_NET_WM_WINDOW_OPACITY` and the compositor does the blending. It is also tagged
+  `_DOKKU_WINDOW`, so picom rules for Dokku windows (no shadow) apply to it. With picom
+  `fading = true`, add `fade = false;` to the Dokku rule (see the README).
+- **Launcher opens faster the first time.** Its widgets are built shortly after startup.
+- **`DOKKU_TIMING=1`** logs the launcher's open and fade timings to the terminal, for
+  tracking down lag.
 - Apps launched from Dokku inherited the directory Dokku was started from, so a file
   manager such as Thunar opened there instead of in your home directory. Dokku now
   switches to your home directory at startup.

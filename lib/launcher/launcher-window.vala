@@ -59,6 +59,37 @@ namespace Dokku {
         private bool has_shown_once = false;
         private uint rebuild_idle_id = 0;
 
+        // DOKKU_TIMING=1 logs how long each step of an open takes
+        private static bool timing = Environment.get_variable("DOKKU_TIMING") == "1";
+        private int64 timing_t0 = 0;
+        private bool timing_wait_draw = false;
+
+        private void timing_log(string what) {
+            if (!timing || timing_t0 == 0) return;
+            message("launcher timing: %s at +%.1f ms", what,
+                (GLib.get_monotonic_time() - timing_t0) / 1000.0);
+        }
+
+        // Collects the frame-clock interval of every fade frame, printed as one line
+        private string trace_buf = "";
+        private int64 trace_last_frame_us = 0;
+
+        private void trace_frame(string what, Gdk.FrameClock clock) {
+            int64 ft = clock.get_frame_time();
+            if (trace_last_frame_us != 0) {
+                trace_buf += " %.1f".printf((ft - trace_last_frame_us) / 1000.0);
+            } else {
+                trace_buf = "";
+            }
+            trace_last_frame_us = ft;
+        }
+
+        private void trace_flush(string what) {
+            message("launcher timing: %s frame intervals (ms):%s", what, trace_buf);
+            trace_buf = "";
+            trace_last_frame_us = 0;
+        }
+
         public signal void pin_to_dock_requested(string app_id, string desktop_file);
 
         public LauncherWindow(AppManager app_manager, ConfigManager config, UsageTracker usage_tracker) {
@@ -77,6 +108,19 @@ namespace Dokku {
             icon_cache = new HashTable<string, Gdk.Pixbuf?>(str_hash, str_equal);
             icon_cache_order = new Queue<string>();
 
+            if (timing) {
+                map_event.connect_after(() => { timing_log("map-event"); return false; });
+                draw.connect_after(() => {
+                    if (timing_wait_draw) {
+                        timing_wait_draw = false;
+                        timing_log("first draw done (opacity %.2f)".printf(fade_level));
+                    }
+                    return false;
+                });
+            }
+            // Tag the window so compositor rules for Dokku windows (no shadow,
+            // no blur) apply to it
+            realize.connect_after(() => CompositorHints.apply(get_window(), false));
             set_app_paintable(true);
             var visual = get_screen().get_rgba_visual();
             if (visual != null) set_visual(visual);
@@ -1644,6 +1688,11 @@ namespace Dokku {
         public void toggle() {
             if (fading_out) return;
 
+            if (timing && !visible) {
+                timing_t0 = GLib.get_monotonic_time();
+                timing_wait_draw = true;
+                message("launcher timing: open requested (first=%s)", (!has_shown_once).to_string());
+            }
             if (visible) {
                 fade_hide();
             } else {
@@ -1686,14 +1735,41 @@ namespace Dokku {
                     search_entry.text = "";
                     on_search_changed();
                 }
+                prewarm();
                 return false;
             });
+        }
+
+        // Show the children and realize the window without mapping it, so the
+        // first real open skips most of the one-time widget setup
+        private void prewarm() {
+            if (has_shown_once || visible) return;
+            var child = get_child();
+            if (child != null) child.show_all();
+            realize();
+            has_shown_once = true;
+            if (timing) message("launcher timing: prewarmed");
         }
 
         // Ease-out cubic: fast start, smooth deceleration
         private static double ease_out_cubic(double t) {
             double f = 1.0 - t;
             return 1.0 - f * f * f;
+        }
+
+        // Fade level of the whole window. On X11 this goes through the
+        // window's opacity property so the compositor blends it; GtkWidget
+        // opacity would make GTK repaint the fullscreen window every frame,
+        // and that stream of damage makes picom stutter.
+        private double fade_level = 1.0;
+
+        private void set_fade_level(double level) {
+            fade_level = level;
+            var gdk_window = get_window();
+            if (gdk_window != null && CompositorHints.set_window_opacity(gdk_window, level)) {
+                return;
+            }
+            this.opacity = level;
         }
 
         private void cancel_fade() {
@@ -1705,6 +1781,13 @@ namespace Dokku {
 
         private void fade_show() {
             cancel_fade();
+            timing_log("prepared, showing");
+
+            // Start transparent before mapping so the compositor never gets a
+            // fully opaque first frame
+            // The window must exist for the opacity property to be set before mapping
+            if (!get_realized()) realize();
+            set_fade_level(config.get_launcher_fade() ? 0.0 : 1.0);
 
             // First open needs show_all() to realize all children;
             // subsequent opens just need show() (children already realized)
@@ -1715,23 +1798,26 @@ namespace Dokku {
                 show();
             }
 
+            timing_log("shown");
             bool fade_enabled = config.get_launcher_fade();
             if (!fade_enabled) {
-                this.opacity = 1.0;
+                set_fade_level(1.0);
                 search_entry.grab_focus();
                 return;
             }
 
-            this.opacity = 0.0;
             search_entry.grab_focus();
+            timing_log("focused");
 
             int64 start_us = GLib.get_monotonic_time();
             fade_tick_id = add_tick_callback((widget, clock) => {
                 int64 elapsed_us = GLib.get_monotonic_time() - start_us;
+                if (timing) { trace_frame("fade-in", clock); }
                 double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                this.opacity = ease_out_cubic(t);
+                set_fade_level(ease_out_cubic(t));
                 if (t >= 1.0) {
                     fade_tick_id = 0;
+                    if (timing) trace_flush("fade-in");
                     return false;
                 }
                 return true;
@@ -1743,21 +1829,26 @@ namespace Dokku {
 
             bool fade_enabled = config.get_launcher_fade();
             if (!fade_enabled) {
-                this.opacity = 1.0;
+                set_fade_level(1.0);
                 hide();
                 return;
             }
-
             fading_out = true;
             int64 start_us = GLib.get_monotonic_time();
+            if (timing) message("launcher timing: fade-out start");
             fade_tick_id = add_tick_callback((widget, clock) => {
                 int64 elapsed_us = GLib.get_monotonic_time() - start_us;
+                if (timing) { trace_frame("fade-out", clock); }
                 double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                this.opacity = 1.0 - ease_out_cubic(t);
+                set_fade_level(1.0 - ease_out_cubic(t));
                 if (t >= 1.0) {
                     fade_tick_id = 0;
                     fading_out = false;
-                    this.opacity = 1.0;
+                    if (timing) { trace_flush("fade-out"); message("launcher timing: fade-out done, hiding"); }
+                    // Unmap while still transparent and leave the opacity at 0.
+                    // A compositor that fades unmapping windows (picom with
+                    // fading on) would otherwise fade a full-opacity ghost out
+                    // a second time. fade_show sets the opacity before mapping.
                     hide();
                     return false;
                 }

@@ -168,12 +168,26 @@ format, theme format and file locations. User themes go in
 Frosted glass needs a compositor with blur support. Dokku sets these X11
 properties so compositor rules can target its windows:
 
-- `_DOKKU_WINDOW` on every Dokku window (dock, blur backdrop, settings): use it
-  to disable blur and shadow for Dokku by default.
+- `_DOKKU_WINDOW` on every Dokku window (dock, blur backdrop, launcher, settings):
+  use it to disable blur and shadow for Dokku by default.
 - `_DOKKU_BLUR` on the capsule-shaped backdrop window only: enable blur for
   windows matching both `_DOKKU_WINDOW` and `_DOKKU_BLUR`.
 
 `_COMPTON_SHADOW` is set to 0 so picom draws no shadow.
+
+**picom and the launcher fade:** on X11 the launcher fades in and out by changing the
+window's `_NET_WM_WINDOW_OPACITY`, so the compositor does the blending. If picom has
+`fading = true`, it also smooths those changes at its own pace, and the launcher
+fades slowly and then pops out. Turn picom's fade off for Dokku windows with a rule:
+
+```
+rules: ({
+  match = "_DOKKU_WINDOW@";
+  shadow = false;
+  blur-background = false;
+  fade = false;
+}, ...)
+```
 
 ## Project layout
 
