@@ -1753,7 +1753,14 @@ namespace Dokku {
         }
 
         // The scroll wheel: volume on the media widget, window switching on an app
+        // Timestamp of the last scroll event acted on. A mouse wheel notch can arrive twice
+        // with one timestamp, as a discrete step and as a smooth one (it does on Wayland),
+        // and it must count once.
+        private uint32 last_scroll_time = 0;
+
         private bool on_scroll(Gdk.EventScroll event) {
+            if (event.time != 0 && event.time == last_scroll_time) return true;
+            last_scroll_time = event.time;
             if (is_reordering) return true;
             double main_coord = is_vertical ? event.y : event.x;
             int index = get_item_at(main_coord);

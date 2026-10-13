@@ -99,6 +99,9 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **A wheel notch counted twice on Wayland.** Wayland delivers each notch as a discrete and a
+  smooth scroll event with the same timestamp, so the volume widget moved about twice as far as
+  intended. A repeat with the same timestamp is now ignored.
 - **`Reload` over D-Bus only reloaded the main dock.** It now does what changing a setting does:
   every dock (one per monitor), the launcher and the hotkeys pick up the new settings.
 - **Launcher fade-out stuttered under picom.** The fade repainted the whole fullscreen window
