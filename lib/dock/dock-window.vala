@@ -411,6 +411,17 @@ namespace Dokku {
                 if (trash != null) {
                     items.append(new DockItem.from_plugin(trash));
                     if (wire_once(trash)) {
+                        trash.trash_finished.connect((ok, count) => {
+                            if (ok) return;
+                            int trash_index = 0;
+                            foreach (var item in items) {
+                                if (item.plugin == trash) {
+                                    preview.flash(trash_index, "Couldn't move to the Trash", 2200);
+                                    break;
+                                }
+                                trash_index++;
+                            }
+                        });
                         trash.changed.connect(() => {
                             renderer.clear_icon_cache("user-trash");
                             renderer.clear_icon_cache("user-trash-full");
@@ -1437,6 +1448,7 @@ namespace Dokku {
         private Gdk.DragContext? peek_context = null;
         private bool peek_ready = false;
         private bool peek_has_files = false;
+        private bool peek_any = false;
         private bool dropping = false;
         // App the pointer is over while dragging files, or -1
         private int drop_open_index = -1;
@@ -1463,6 +1475,7 @@ namespace Dokku {
             peek_context = null;
             peek_ready = false;
             peek_has_files = false;
+            peek_any = false;
             if (drop_open_index >= 0) {
                 drop_open_index = -1;
                 hovering = false;
@@ -1480,6 +1493,7 @@ namespace Dokku {
             if (!dropping) {
                 // The look at the drag that on_drag_motion asked for
                 peek_has_files = false;
+                peek_any = uris.length > 0;
                 foreach (var uri in uris) {
                     if (!is_desktop_uri(uri)) { peek_has_files = true; break; }
                 }
@@ -1487,6 +1501,20 @@ namespace Dokku {
                 return;
             }
             dropping = false;
+
+            // Anything dropped on the Trash goes into it
+            int over_drop = get_item_at(is_vertical ? (double) y : (double) x);
+            var over_drop_item = over_drop >= 0 ? items.nth_data(over_drop) : null;
+            if (over_drop_item != null && over_drop_item.plugin is TrashPlugin && uris.length > 0) {
+                int sent = (over_drop_item.plugin as TrashPlugin).trash_uris(uris);
+                if (sent == 0) preview.flash(over_drop, "That can't be moved to the Trash", 1800);
+                clear_file_drop_state();
+                drop_insert_index = -1;
+                position_dock();
+                schedule_redraw();
+                Gtk.drag_finish(context, sent > 0, false, time);
+                return;
+            }
 
             // Files dropped on an app open in it
             var files = new List<string>();
@@ -1557,6 +1585,26 @@ namespace Dokku {
                 peek_ready = false;
                 peek_has_files = false;
                 Gtk.drag_get_data(this, context, Gdk.Atom.intern("text/uri-list", false), time);
+            }
+
+            // The Trash takes anything: it is the target, whatever is being dragged
+            if (peek_ready && peek_any) {
+                int hover = get_item_at(is_vertical ? (double) y : (double) x);
+                var hover_item = hover >= 0 ? items.nth_data(hover) : null;
+                if (hover_item != null && hover_item.plugin is TrashPlugin) {
+                    if (drop_insert_index >= 0) {
+                        drop_insert_index = -1;
+                        position_dock();
+                    }
+                    Gdk.drag_status(context, Gdk.DragAction.COPY, time);
+                    drop_open_index = hover;
+                    hovering = true;
+                    mouse_x = x;
+                    mouse_y = y;
+                    hovered_index = hover;
+                    schedule_redraw();
+                    return true;
+                }
             }
 
             // Files, not .desktop entries: the icon under the pointer is the target

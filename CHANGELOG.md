@@ -7,6 +7,11 @@ All notable changes to Dokku are listed here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Drag files onto the Trash.** Dropping files or folders on the Trash icon moves them to the
+  Trash (through `gio trash`, so Restore and Undo in the file manager work). The icon enlarges
+  as the drop target, turns "full" afterwards, and a message explains when something can't be
+  trashed. The home folder and everything above it, the Trash itself, and files that a
+  `file://` address places on another machine are refused.
 - **Per-monitor dock settings.** With more than one monitor, Settings, Behavior, Monitors lists
   each one with its own edge, icon size and auto-hide; "Default" follows the settings for all
   monitors. They are kept in `[Monitor:<make> <model> <size>]` sections of `config.ini`
@@ -99,6 +104,10 @@ All notable changes to Dokku are listed here. The format follows
   the app id or command. Launch count only breaks ties.
 
 ### Fixed
+- **Messages over the dock vanished almost at once.** Hover handling dismissed them as soon as the
+  pointer moved. A message now stays for its full time.
+- **The Trash icon stayed "empty" after the first file was trashed** when the Trash folder
+  did not exist yet when Dokku started. The folder is created at startup.
 - **A wheel notch counted twice on Wayland.** Wayland delivers each notch as a discrete and a
   smooth scroll event with the same timestamp, so the volume widget moved about twice as far as
   intended. A repeat with the same timestamp is now ignored.

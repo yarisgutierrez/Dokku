@@ -26,6 +26,8 @@ namespace Dokku {
             target_index = index;
             hover_timeout_id = Timeout.add(delay_ms, () => {
                 hover_timeout_id = 0;
+                // A message is on screen: let it be read before a hover popup replaces it
+                if (flash_timeout_id != 0) return false;
                 if (window_list)
                     show_windows(index);
                 else
@@ -42,7 +44,15 @@ namespace Dokku {
             target_index = -1;
         }
 
+        // Hover handling dismisses popups all the time (the pointer moves, an icon changes).
+        // A message from flash() is meant to be read, so it is left to run its time out;
+        // anything that opens another popup replaces it.
         public void dismiss() {
+            if (flash_timeout_id != 0) return;
+            close_popup();
+        }
+
+        private void close_popup() {
             cancel_dismiss();
             if (flash_timeout_id != 0) { Source.remove(flash_timeout_id); flash_timeout_id = 0; }
             flash_label = null;
@@ -75,7 +85,7 @@ namespace Dokku {
         // Remove timers and the popup window (dock being destroyed).
         public void shutdown() {
             if (hover_timeout_id != 0) { Source.remove(hover_timeout_id); hover_timeout_id = 0; }
-            dismiss();
+            close_popup();
         }
 
         // A short message over an item, such as the volume after a scroll. Calling it
@@ -92,7 +102,7 @@ namespace Dokku {
             if (flash_timeout_id != 0) Source.remove(flash_timeout_id);
             flash_timeout_id = Timeout.add(ms, () => {
                 flash_timeout_id = 0;
-                dismiss();
+                close_popup();
                 return Source.REMOVE;
             });
         }
@@ -114,7 +124,7 @@ namespace Dokku {
             var item = host.popup_item(index);
             if (item == null) return;
 
-            dismiss();
+            close_popup();
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 
@@ -155,7 +165,7 @@ namespace Dokku {
             var item = host.popup_item(index);
             if (item == null || item.windows.length() <= 1) return;
 
-            dismiss();
+            close_popup();
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 

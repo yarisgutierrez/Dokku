@@ -17,7 +17,7 @@ Wayland. Written in Vala (GTK3, Cairo).
 - **Notification badges, progress bars and launch/attention bounce**
 - **Recent files** in the right-click menu
 - **Mouse shortcuts:** middle-click opens a new window, scroll switches an app's windows,
-  clicking the focused app minimizes it, and dropping a file on an icon opens it there
+  clicking the focused app minimizes it, dropping a file on an icon opens it there, and dropping files on the Trash moves them to it
 - **Media widget** (MPRIS2) with album art; rest the pointer on it for a popup with the
   artist, song, album, a seek bar and playback controls. Scroll on it for volume and
   middle-click to play or pause. It follows the player that is playing, and Settings can
