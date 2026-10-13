@@ -1,6 +1,8 @@
 # Build
 build/
 builddir/
+build-deb/
+dist/
 
 # Editor
 *.swp

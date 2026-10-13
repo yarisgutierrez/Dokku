@@ -49,6 +49,14 @@ ninja -C build
 
 ## Install
 
+**Debian, Ubuntu and derivatives:** download the `.deb` from the
+[releases page](https://github.com/yarisgutierrez/Dokku/releases) and install it with
+`sudo apt install ./dokku_*.deb`. It starts at login and pulls in the libraries it needs. It is
+built on Ubuntu 24.04, so it needs a system at least as new as that (glibc 2.38; Debian 13 and
+Ubuntu 24.04 qualify). On an older system, build from source as below.
+
+**From source:**
+
 ```sh
 meson setup build --prefix=/usr
 ninja -C build
