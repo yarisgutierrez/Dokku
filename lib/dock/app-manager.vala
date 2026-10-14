@@ -221,8 +221,7 @@ namespace Dokku {
             var info = new DesktopAppInfo.from_filename(desktop_file);
             if (info == null) return false;
             try {
-                var display = Gdk.Display.get_default();
-                return info.launch_uris(uris, display != null ? display.get_app_launch_context() : null);
+                return info.launch_uris(uris, UiUtil.launch_context());
             } catch (Error e) {
                 warning("Failed to open files with %s: %s", name, e.message);
                 return false;
@@ -238,8 +237,7 @@ namespace Dokku {
                 var info = new DesktopAppInfo.from_filename(desktop_file);
                 if (info != null) {
                     try {
-                        var display = Gdk.Display.get_default();
-                        info.launch(null, display != null ? display.get_app_launch_context() : null);
+                        info.launch(null, UiUtil.launch_context());
                     } catch (Error e) {
                         warning("Failed to launch %s: %s", name, e.message);
                     }

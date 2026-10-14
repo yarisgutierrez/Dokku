@@ -35,24 +35,13 @@ namespace Dokku {
 
             // Popup: large enough for the scaled icon + "Remove" label
             int popup_size = (int)(icon_size * 1.8);
-            popup = new Gtk.Window(Gtk.WindowType.POPUP);
-            popup.set_type_hint(Gdk.WindowTypeHint.DND);
-            popup.set_skip_taskbar_hint(true);
-            popup.set_skip_pager_hint(true);
-            popup.set_decorated(false);
-            popup.set_resizable(false);
-            var vis = popup.get_screen().get_rgba_visual();
-            if (vis != null) popup.set_visual(vis);
-            popup.set_app_paintable(true);
+            popup = PopupHelper.create_window(Gdk.WindowTypeHint.DND);
             popup.set_size_request(popup_size, popup_size);
             popup.resize(popup_size, popup_size);
 
             // Single draw handler: switches between drag and poof modes
             popup.draw.connect((cr) => {
-                cr.set_operator(Cairo.Operator.SOURCE);
-                cr.set_source_rgba(0, 0, 0, 0);
-                cr.paint();
-                cr.set_operator(Cairo.Operator.OVER);
+                UiUtil.clear(cr);
                 if (icon == null) return false;
 
                 if (popup == null) return false;

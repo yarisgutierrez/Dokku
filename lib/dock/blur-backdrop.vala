@@ -81,9 +81,7 @@ namespace Dokku {
 
             window.draw.connect((cr) => {
                 // Transparent — compositor blur shows through this window.
-                cr.set_operator(Cairo.Operator.SOURCE);
-                cr.set_source_rgba(0, 0, 0, 0);
-                cr.paint();
+                UiUtil.clear(cr);
                 return true;
             });
 

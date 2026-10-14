@@ -51,10 +51,7 @@ namespace Dokku {
         }
 
         public static void draw_background(Cairo.Context cr, Gtk.Widget popup, Theme? theme_ref, double radius) {
-            cr.set_operator(Cairo.Operator.SOURCE);
-            cr.set_source_rgba(0, 0, 0, 0);
-            cr.paint();
-            cr.set_operator(Cairo.Operator.OVER);
+            UiUtil.clear(cr);
 
             int w = popup.get_allocated_width();
             int h = popup.get_allocated_height();

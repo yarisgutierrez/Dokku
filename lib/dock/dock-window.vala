@@ -226,8 +226,7 @@ namespace Dokku {
             this.destroy.connect(() => {
                 // Pointer grab
                 if (is_reordering) {
-                    var seat = get_display().get_default_seat();
-                    seat.ungrab();
+                    PopupHelper.ungrab(this);
                     is_reordering = false;
                 }
                 drag_float.destroy();
@@ -315,10 +314,7 @@ namespace Dokku {
          */
         private Gdk.Monitor? get_dock_monitor() {
             if (target_monitor != null) return target_monitor;
-            var display = Gdk.Display.get_default();
-            var mon = display.get_primary_monitor();
-            if (mon == null) mon = display.get_monitor(0);
-            return mon;
+            return UiUtil.primary_monitor();
         }
 
         // The compositor takes a layer surface's size from the window. A GTK3 window
@@ -643,11 +639,6 @@ namespace Dokku {
             sync_blur_bg(x, y, w, h);
         }
 
-        private static double ease_out_cubic(double t) {
-            double f = 1.0 - t;
-            return 1.0 - f * f * f;
-        }
-
         private void set_hidden(bool hide) {
             hidden = hide;
             animate_slide(hide ? 1.0 : 0.0);
@@ -664,7 +655,7 @@ namespace Dokku {
                 if (slide_start_time < 0) slide_start_time = now;
                 int64 elapsed_us = now - slide_start_time;
                 double t = double.min(1.0, elapsed_us / (SLIDE_DURATION_MS * 1000.0));
-                dock_slide_offset = slide_from + (slide_to - slide_from) * ease_out_cubic(t);
+                dock_slide_offset = slide_from + (slide_to - slide_from) * UiUtil.ease_out_cubic(t);
                 apply_dock_position();
                 queue_draw();
                 if (t >= 1.0) {
@@ -873,10 +864,7 @@ namespace Dokku {
         }
 
         private bool on_draw(Cairo.Context cr) {
-            cr.set_operator(Cairo.Operator.SOURCE);
-            cr.set_source_rgba(0, 0, 0, 0);
-            cr.paint();
-            cr.set_operator(Cairo.Operator.OVER);
+            UiUtil.clear(cr);
 
             int n = (int)items.length();
             int width = get_allocated_width();
@@ -1808,10 +1796,7 @@ namespace Dokku {
 
         private bool on_button_release(Gdk.EventButton event) {
             // Always ungrab the pointer if we grabbed it
-            if (is_reordering) {
-                var seat = get_display().get_default_seat();
-                seat.ungrab();
-            }
+            if (is_reordering) PopupHelper.ungrab(this);
 
             double main_coord = along(event.x, event.y);
             if (event.button == 2 && middle_index >= 0) {

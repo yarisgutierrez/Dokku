@@ -104,9 +104,7 @@ namespace Dokku {
         }
 
         private void calculate_scale() {
-            var display = Gdk.Display.get_default();
-            var monitor = display.get_primary_monitor() ?? display.get_monitor(0);
-            var geom = monitor.get_geometry();
+            var geom = UiUtil.primary_monitor().get_geometry();
             int height = geom.height;
 
             // Scale based on vertical resolution (1080p as baseline)
@@ -900,9 +898,7 @@ namespace Dokku {
                 foreach (var action in desktop_info.list_actions()) {
                     string action_name = action;
                     MenuUtil.add_item(menu, desktop_info.get_action_name(action), () => {
-                        var display = Gdk.Display.get_default();
-                        desktop_info.launch_action(action_name,
-                            display != null ? display.get_app_launch_context() : null);
+                        desktop_info.launch_action(action_name, UiUtil.launch_context());
                         usage_tracker.record_launch(app.id);
                         fade_hide();
                     });
@@ -942,7 +938,7 @@ namespace Dokku {
                 btn.add_tick_callback((widget, clock) => {
                     int64 elapsed = GLib.get_monotonic_time() - anim_start;
                     double t = double.min(1.0, elapsed / 250000.0);
-                    btn.opacity = ease_out_cubic(t);
+                    btn.opacity = UiUtil.ease_out_cubic(t);
                     if (t >= 1.0) {
                         newly_created_folder_id = null;
                         return false;
@@ -1218,10 +1214,7 @@ namespace Dokku {
 
                 if (t < 0.55) {
                     // Phase 1: ease-out cubic rise
-                    double p = t / 0.55;
-                    double f = 1.0 - p;
-                    double ease = 1.0 - f * f * f;
-                    widget.opacity = 0.3 + 0.7 * ease;
+                    widget.opacity = 0.3 + 0.7 * UiUtil.ease_out_cubic(t / 0.55);
                 } else {
                     // Phase 2: sine bounce — dips to ~0.92 then recovers
                     double p = (t - 0.55) / 0.45;
@@ -1508,12 +1501,6 @@ namespace Dokku {
             });
         }
 
-        // Ease-out cubic: fast start, smooth deceleration
-        private static double ease_out_cubic(double t) {
-            double f = 1.0 - t;
-            return 1.0 - f * f * f;
-        }
-
         // Fade level of the whole window. On X11 this goes through the
         // window's opacity property so the compositor blends it; GtkWidget
         // opacity would make GTK repaint the fullscreen window every frame,
@@ -1567,7 +1554,7 @@ namespace Dokku {
             fade_tick_id = add_tick_callback((widget, clock) => {
                 int64 elapsed_us = GLib.get_monotonic_time() - start_us;
                 double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                set_fade_level(ease_out_cubic(t));
+                set_fade_level(UiUtil.ease_out_cubic(t));
                 if (t >= 1.0) {
                     fade_tick_id = 0;
                     return false;
@@ -1591,7 +1578,7 @@ namespace Dokku {
             fade_tick_id = add_tick_callback((widget, clock) => {
                 int64 elapsed_us = GLib.get_monotonic_time() - start_us;
                 double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                set_fade_level(1.0 - ease_out_cubic(t));
+                set_fade_level(1.0 - UiUtil.ease_out_cubic(t));
                 if (t >= 1.0) {
                     fade_tick_id = 0;
                     fading_out = false;

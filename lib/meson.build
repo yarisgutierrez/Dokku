@@ -11,6 +11,7 @@ libdokku_sources = files(
   'core/text-utils.vala',
   'core/icon-loader.vala',
   'core/menu-util.vala',
+  'core/ui-util.vala',
   'core/icon-picker.vala',
   'core/dialogs.vala',
   'core/capabilities.vala',

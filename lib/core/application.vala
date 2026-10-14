@@ -257,8 +257,7 @@ namespace Dokku {
             }
 
             // Pin primary dock to primary monitor
-            var primary = display.get_primary_monitor();
-            if (primary == null) primary = display.get_monitor(0);
+            var primary = UiUtil.primary_monitor();
             dock.set_target_monitor(primary);
 
             // Build set of monitors that need docks
