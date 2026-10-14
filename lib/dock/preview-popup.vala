@@ -37,10 +37,7 @@ namespace Dokku {
         }
 
         public void cancel_timer() {
-            if (hover_timeout_id != 0) {
-                Source.remove(hover_timeout_id);
-                hover_timeout_id = 0;
-            }
+            PopupHelper.clear_source(ref hover_timeout_id);
             target_index = -1;
         }
 
@@ -54,7 +51,7 @@ namespace Dokku {
 
         private void close_popup() {
             cancel_dismiss();
-            if (flash_timeout_id != 0) { Source.remove(flash_timeout_id); flash_timeout_id = 0; }
+            PopupHelper.clear_source(ref flash_timeout_id);
             flash_label = null;
             flash_index = -1;
             tip_label = null;
@@ -76,15 +73,12 @@ namespace Dokku {
         }
 
         public void cancel_dismiss() {
-            if (dismiss_timeout_id != 0) {
-                Source.remove(dismiss_timeout_id);
-                dismiss_timeout_id = 0;
-            }
+            PopupHelper.clear_source(ref dismiss_timeout_id);
         }
 
         // Remove timers and the popup window (dock being destroyed).
         public void shutdown() {
-            if (hover_timeout_id != 0) { Source.remove(hover_timeout_id); hover_timeout_id = 0; }
+            PopupHelper.clear_source(ref hover_timeout_id);
             close_popup();
         }
 
@@ -99,7 +93,7 @@ namespace Dokku {
                 flash_label = popup != null ? (popup.get_child() as Gtk.Label) : null;
                 flash_index = index;
             }
-            if (flash_timeout_id != 0) Source.remove(flash_timeout_id);
+            PopupHelper.clear_source(ref flash_timeout_id);
             flash_timeout_id = Timeout.add(ms, () => {
                 flash_timeout_id = 0;
                 close_popup();
@@ -130,12 +124,8 @@ namespace Dokku {
 
             var label = new Gtk.Label(text != null ? text : item.name);
             label.margin = 6;
-            var css = new Gtk.CssProvider();
-            try {
-                css.load_from_data(host.popup_is_light() ?
-                    "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
-            } catch (Error e) {}
-            label.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+            label.get_style_context().add_provider(PopupHelper.label_color(host.popup_is_light()),
+                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
             popup.add(label);
 
             var theme_ref = host.popup_theme();
@@ -147,18 +137,7 @@ namespace Dokku {
             tip_label = label;
             tip_index = index;
             host.show_popup(popup, index, 8);
-
-            popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                     Gdk.EventMask.LEAVE_NOTIFY_MASK);
-            popup.enter_notify_event.connect((ev) => {
-                cancel_dismiss();
-                return false;
-            });
-            popup.leave_notify_event.connect((ev) => {
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                schedule_dismiss();
-                return false;
-            });
+            PopupHelper.watch_pointer(popup, cancel_dismiss, schedule_dismiss);
         }
 
         public void show_windows(int index) {
@@ -169,12 +148,7 @@ namespace Dokku {
 
             popup = PopupHelper.create_window(Gdk.WindowTypeHint.TOOLTIP, host.popup_parent());
 
-            bool popup_light = host.popup_is_light();
-            var label_css = new Gtk.CssProvider();
-            try {
-                label_css.load_from_data(popup_light ?
-                    "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
-            } catch (Error e) {}
+            var label_css = PopupHelper.label_color(host.popup_is_light());
 
             var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
             box.margin = 8;
@@ -220,25 +194,9 @@ namespace Dokku {
                 return false;
             });
 
-            popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                     Gdk.EventMask.LEAVE_NOTIFY_MASK);
-
             popup.add(box);
             host.show_popup(popup, index, 8);
-
-            // Mouse entering popup cancels any pending dismiss
-            popup.enter_notify_event.connect((ev) => {
-                cancel_dismiss();
-                return false;
-            });
-
-            // Mouse leaving popup schedules a delayed dismiss
-            popup.leave_notify_event.connect((ev) => {
-                // Ignore leave events caused by entering child widgets
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                schedule_dismiss();
-                return false;
-            });
+            PopupHelper.watch_pointer(popup, cancel_dismiss, schedule_dismiss);
         }
     }
 }

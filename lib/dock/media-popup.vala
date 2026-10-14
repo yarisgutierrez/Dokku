@@ -10,7 +10,7 @@ namespace Dokku {
 
         // Remove timers and the popup window (dock being destroyed).
         public void shutdown() {
-            if (dismiss_id != 0) { Source.remove(dismiss_id); dismiss_id = 0; }
+            PopupHelper.clear_source(ref dismiss_id);
             cancel_request();
             teardown();
             if (popup != null) { popup.destroy(); popup = null; }
@@ -111,10 +111,7 @@ namespace Dokku {
         }
 
         public void cancel_dismiss() {
-            if (dismiss_id != 0) {
-                Source.remove(dismiss_id);
-                dismiss_id = 0;
-            }
+            PopupHelper.clear_source(ref dismiss_id);
         }
 
         // Open after the pointer has rested on the widget for a moment
@@ -133,7 +130,7 @@ namespace Dokku {
 
         // Called when the pointer is off the widget: hover may open the popup again
         public void cancel_request() {
-            if (request_id != 0) { Source.remove(request_id); request_id = 0; }
+            PopupHelper.clear_source(ref request_id);
             hover_suppressed = false;
         }
 
@@ -166,8 +163,8 @@ namespace Dokku {
             if (mp != null && changed_handler != 0) mp.disconnect(changed_handler);
             changed_handler = 0;
             mp = null;
-            if (tick_id != 0) { Source.remove(tick_id); tick_id = 0; }
-            if (seek_id != 0) { Source.remove(seek_id); seek_id = 0; }
+            PopupHelper.clear_source(ref tick_id);
+            PopupHelper.clear_source(ref seek_id);
             seek_pending = false;
             scrubbing = false;
         }
@@ -304,7 +301,7 @@ namespace Dokku {
         }
 
         private void commit_seek() {
-            if (seek_id != 0) { Source.remove(seek_id); seek_id = 0; }
+            PopupHelper.clear_source(ref seek_id);
             if (!seek_pending) return;
             seek_pending = false;
             if (mp != null) mp.seek_to(pending_us);
@@ -401,7 +398,7 @@ namespace Dokku {
                 pos_label.label = format_time(pending_us);
                 // While dragging, seek once on release; otherwise (a click, the keyboard) once it settles
                 if (!scrubbing) {
-                    if (seek_id != 0) Source.remove(seek_id);
+                    PopupHelper.clear_source(ref seek_id);
                     seek_id = Timeout.add(150, () => { seek_id = 0; commit_seek(); return false; });
                 }
                 return false;
@@ -456,20 +453,9 @@ namespace Dokku {
             // Fade in
             start_fade(false);
 
-            // Track mouse enter/leave on popup for dismiss-on-leave
-            popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK |
-                                   Gdk.EventMask.LEAVE_NOTIFY_MASK);
-            popup.enter_notify_event.connect((ev) => {
-                pointer_inside = true;
-                cancel_dismiss();
-                return false;
-            });
-            popup.leave_notify_event.connect((ev) => {
-                if (ev.detail == Gdk.NotifyType.INFERIOR) return false;
-                pointer_inside = false;
-                schedule_dismiss();
-                return false;
-            });
+            PopupHelper.watch_pointer(popup,
+                () => { pointer_inside = true; cancel_dismiss(); },
+                () => { pointer_inside = false; schedule_dismiss(); });
         }
 
         private Gtk.Label make_label(string css_class, Gtk.CssProvider css_provider) {

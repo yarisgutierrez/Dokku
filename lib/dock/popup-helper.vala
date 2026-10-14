@@ -1,5 +1,6 @@
 namespace Dokku {
     public delegate void DismissFunc();
+    public delegate void PointerFunc();
 
     // Shared construction/painting for the dock's themed popup windows.
     public class PopupHelper : GLib.Object {
@@ -17,6 +18,36 @@ namespace Dokku {
             if (vis != null) popup.set_visual(vis);
             popup.set_app_paintable(true);
             return popup;
+        }
+
+        // Stop a timer and forget its id (a no-op when none is pending)
+        public static void clear_source(ref uint id) {
+            if (id == 0) return;
+            Source.remove(id);
+            id = 0;
+        }
+
+        // Colours every label in a popup for a light or dark background
+        public static Gtk.CssProvider label_color(bool light) {
+            var css = new Gtk.CssProvider();
+            try {
+                css.load_from_data(light ? "label { color: #1a1a1a; }" : "label { color: #ffffff; }");
+            } catch (Error e) {}
+            return css;
+        }
+
+        // Call `on_enter` / `on_leave` as the pointer enters or leaves the popup. Moves
+        // between the popup and its own children are not reported.
+        public static void watch_pointer(Gtk.Window popup, owned PointerFunc on_enter, owned PointerFunc on_leave) {
+            popup.add_events(Gdk.EventMask.ENTER_NOTIFY_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK);
+            popup.enter_notify_event.connect((ev) => {
+                on_enter();
+                return false;
+            });
+            popup.leave_notify_event.connect((ev) => {
+                if (ev.detail != Gdk.NotifyType.INFERIOR) on_leave();
+                return false;
+            });
         }
 
         public static void draw_background(Cairo.Context cr, Gtk.Widget popup, Theme? theme_ref, double radius) {
