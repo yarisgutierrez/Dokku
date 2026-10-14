@@ -35,7 +35,8 @@ namespace Dokku {
         private double slide_from = 0.0;
         private double slide_to = 0.0;
         private const int SLIDE_DURATION_MS = 250;
-        private const int SEPARATOR_WIDTH = 24;
+        // The separator's line is this long; it also gets the usual spacing around it
+        private const int SEPARATOR_LINE = 18;
 
         private int drag_index = -1;
         private double drag_start_x;
@@ -236,8 +237,7 @@ namespace Dokku {
 
                 // Timeouts
                 if (dodge_check_timeout_id != 0) { Source.remove(dodge_check_timeout_id); dodge_check_timeout_id = 0; }
-                if (hide_timeout_id != 0) { Source.remove(hide_timeout_id); hide_timeout_id = 0; }
-                if (launch_rehide_timeout_id != 0) { Source.remove(launch_rehide_timeout_id); launch_rehide_timeout_id = 0; }
+                cancel_hide_timers();
 
                 // Tick callbacks are auto-removed on widget destroy, but null IDs
                 slide_tick_id = 0;
@@ -576,14 +576,8 @@ namespace Dokku {
         private int calculate_dock_length() {
             int total = dock_padding * 2;
             foreach (var item in items) {
-                if (item.is_separator) {
-                    total += SEPARATOR_WIDTH;
-                } else {
-                    double wf = item.dock_width_factor;
-                    if (is_vertical && item.is_media_widget) wf = 1.0;
-                    double mag = (item.is_media_widget || item.is_launcher) ? 1.0 : renderer.magnification;
-                    total += (int)(renderer.icon_size * wf * mag) + renderer.spacing;
-                }
+                bool magnifies = !(item.is_media_widget || item.is_launcher);
+                total += (int) item_length(item, magnifies ? renderer.magnification : 1.0);
             }
             // Always reserve room for the gap that opens while dropping or
             // reordering. Without it a dock sized exactly to its content
@@ -651,6 +645,11 @@ namespace Dokku {
         private static double ease_out_cubic(double t) {
             double f = 1.0 - t;
             return 1.0 - f * f * f;
+        }
+
+        private void set_hidden(bool hide) {
+            hidden = hide;
+            animate_slide(hide ? 1.0 : 0.0);
         }
 
         private void animate_slide(double target) {
@@ -780,11 +779,9 @@ namespace Dokku {
             if (hovering) return;
 
             if (should_hide && !hidden) {
-                hidden = true;
-                animate_slide(1.0);
+                set_hidden(true);
             } else if (!should_hide && hidden && !auto_hide) {
-                hidden = false;
-                animate_slide(0.0);
+                set_hidden(false);
             }
         }
 
@@ -922,7 +919,7 @@ namespace Dokku {
 
             if (auto_hide || dodge_hiding) {
                 if (!input_shape_known || !input_shape_cleared) {
-                    window.input_shape_combine_region(null, 0, 0);
+                    window.input_shape_combine_region((Cairo.Region) null, 0, 0);  // null: the whole window takes input
                     input_shape_known = true;
                     input_shape_cleared = true;
                 }
@@ -955,27 +952,16 @@ namespace Dokku {
         }
 
         private void compute_layout(int container_size, double[] scales, out double dock_width) {
-            double mouse_pos = is_vertical ? mouse_y : mouse_x;
+            double mouse_pos = along(mouse_x, mouse_y);
 
             // Calculate base dimension and positions for scale calculation
             double base_dim = 0;
+            foreach (var item in items) base_dim += item_length(item);
+
+            double pos = (container_size - base_dim) / 2.0;
             int i = 0;
             foreach (var item in items) {
-                double wf = item.dock_width_factor;
-                if (is_vertical && item.is_media_widget) wf = 1.0;
-                base_dim += item.is_separator ? (18 + renderer.spacing) :
-                    (renderer.icon_size * wf + renderer.spacing);
-                i++;
-            }
-
-            double base_offset = (container_size - base_dim) / 2.0;
-            double pos = base_offset;
-            i = 0;
-            foreach (var item in items) {
-                double wf = item.dock_width_factor;
-                if (is_vertical && item.is_media_widget) wf = 1.0;
-                double item_len = item.is_separator ? (18 + renderer.spacing) :
-                    (renderer.icon_size * wf + renderer.spacing);
+                double item_len = item_length(item);
                 double center = pos + item_len / 2.0;
                 if (item.is_separator || item.is_launcher || item.is_media_widget) {
                     scales[i] = 1.0;
@@ -994,14 +980,9 @@ namespace Dokku {
                 (is_reordering ? reorder_insert_index : -1);
             i = 0;
             foreach (var item in items) {
-                double wf = item.dock_width_factor;
-                if (is_vertical && item.is_media_widget) wf = 1.0;
-                if (active_gap >= 0 && i == active_gap) {
-                    if (!is_reordering || i != drag_index)
-                        actual_width += gap_width;
-                }
-                actual_width += item.is_separator ? (18 + renderer.spacing) :
-                    (renderer.icon_size * wf * scales[i] + renderer.spacing);
+                if (active_gap >= 0 && i == active_gap && (!is_reordering || i != drag_index))
+                    actual_width += gap_width;
+                actual_width += item_length(item, scales[i]);
                 i++;
             }
             if (active_gap >= 0 && active_gap >= (int)items.length()) {
@@ -1012,11 +993,6 @@ namespace Dokku {
 
         private bool is_light_theme() {
             return current_theme != null && current_theme.is_light();
-        }
-
-        private void draw_rounded_rect(Cairo.Context cr, double x, double y,
-                                        double w, double h, double radius) {
-            DockRenderer.draw_rounded_rect(cr, x, y, w, h, radius);
         }
 
         private void draw_dock_background(Cairo.Context cr, double dock_dim) {
@@ -1046,13 +1022,13 @@ namespace Dokku {
             // Outer shadow — soft dark glow behind the dock for depth
             if (radius > 0) {
                 double shadow_alpha = light ? 0.10 : 0.20;
-                draw_rounded_rect(cr, x - 1, y + 1, w + 2, h + 1, radius + 2);
+                DockRenderer.draw_rounded_rect(cr, x - 1, y + 1, w + 2, h + 1, radius + 2);
                 cr.set_source_rgba(0, 0, 0, shadow_alpha * dock_opacity);
                 cr.fill();
             }
 
             // --- Background fill ---
-            draw_rounded_rect(cr, x, y, w, h, radius);
+            DockRenderer.draw_rounded_rect(cr, x, y, w, h, radius);
             double fill_alpha = blur_enabled ? dock_opacity * 0.45 : dock_opacity;
             if (current_theme != null)
                 cr.set_source_rgba(current_theme.bg_red, current_theme.bg_green,
@@ -1065,7 +1041,7 @@ namespace Dokku {
             if (radius > 0) {
                 double bw = 1.5;
                 double inset = bw / 2.0;
-                draw_rounded_rect(cr, x + inset, y + inset, w - bw, h - bw, radius - inset);
+                DockRenderer.draw_rounded_rect(cr, x + inset, y + inset, w - bw, h - bw, radius - inset);
                 if (light) {
                     cr.set_source_rgba(1, 1, 1, 0.55 * dock_opacity);
                 } else {
@@ -1076,7 +1052,7 @@ namespace Dokku {
 
                 // Top edge glint
                 cr.save();
-                draw_rounded_rect(cr, x, y, w, h, radius);
+                DockRenderer.draw_rounded_rect(cr, x, y, w, h, radius);
                 cr.clip();
                 if (light) {
                     cr.move_to(x + radius, y + 0.5);
@@ -1091,7 +1067,7 @@ namespace Dokku {
                 cr.stroke();
                 cr.restore();
             } else {
-                draw_rounded_rect(cr, x, y, w, h, 0);
+                DockRenderer.draw_rounded_rect(cr, x, y, w, h, 0);
                 if (current_theme != null)
                     cr.set_source_rgba(current_theme.border_red, current_theme.border_green,
                                        current_theme.border_blue, current_theme.border_alpha * dock_opacity);
@@ -1128,12 +1104,7 @@ namespace Dokku {
          */
         private double calculate_rest_dock_length() {
             double total = dock_padding * 2;
-            foreach (var item in items) {
-                double wf = item.dock_width_factor;
-                if (is_vertical && item.is_media_widget) wf = 1.0;
-                total += item.is_separator ? (18 + renderer.spacing) :
-                    (renderer.icon_size * wf + renderer.spacing);
-            }
+            foreach (var item in items) total += item_length(item);
             return Math.fmax(total, 200);
         }
 
@@ -1183,7 +1154,7 @@ namespace Dokku {
             double start_pos = (container - actual_dim) / 2.0;
             double pos = start_pos;
             double gap_width = renderer.spacing * 2;
-            double mouse_coord = is_vertical ? mouse_y : mouse_x;
+            double mouse_coord = along(mouse_x, mouse_y);
             // Compute once outside the loop — this value is invariant per frame
             int active_gap_index = drop_insert_index >= 0 ? drop_insert_index :
                 (is_reordering && !drag_removing ? reorder_insert_index : -1);
@@ -1197,31 +1168,16 @@ namespace Dokku {
                     }
                 }
 
+                double item_len = item_length(item, scales[i]);
                 if (is_reordering && i == drag_index) {
-                    double skip_wf = item.dock_width_factor;
-                    if (is_vertical && item.is_media_widget) skip_wf = 1.0;
-                    double skip_w = item.is_separator ? (18 + renderer.spacing) :
-                        (renderer.icon_size * scales[i] * skip_wf + renderer.spacing);
-                    pos += skip_w;
+                    pos += item_len;
                     i++;
                     continue;
                 }
 
                 double sz = renderer.icon_size * scales[i];
-                double main_pos, item_len;
-                double item_wf = item.dock_width_factor;
-                if (is_vertical && item.is_media_widget) item_wf = 1.0;
-                if (item.is_separator) {
-                    item_len = 18 + renderer.spacing;
-                    // Center the line between adjacent icons: the preceding item
-                    // contributes renderer.spacing of trailing gap, so offset the
-                    // line toward the start to compensate.
-                    main_pos = pos + (item_len - renderer.spacing) / 2.0;
-                } else {
-                    double eff = sz * item_wf;
-                    main_pos = pos + eff / 2.0;
-                    item_len = eff + renderer.spacing;
-                }
+                // Centred on the item itself: the spacing is trailing room after it
+                double main_pos = pos + (item_len - renderer.spacing) / 2.0;
 
                 double mag_offset = (sz - renderer.icon_size) / 2.0;
                 double x, y;
@@ -1281,14 +1237,7 @@ namespace Dokku {
         }
 
         private void draw_gap_indicator(Cairo.Context cr, double main_pos, double cross_center) {
-            if (current_theme != null) {
-                cr.set_source_rgba(current_theme.indicator_red, current_theme.indicator_green,
-                                   current_theme.indicator_blue, 0.55);
-            } else if (is_light_theme()) {
-                cr.set_source_rgba(0.15, 0.15, 0.15, 0.45);
-            } else {
-                cr.set_source_rgba(1, 1, 1, 0.45);
-            }
+            renderer.set_indicator_color(cr, 0.55);
             cr.set_line_width(2);
             cr.set_line_cap(Cairo.LineCap.ROUND);
             double half = renderer.icon_size * 0.35;
@@ -1305,7 +1254,7 @@ namespace Dokku {
         private bool on_motion(Gdk.EventMotion event) {
             mouse_x = event.x;
             mouse_y = event.y;
-            double main_coord = is_vertical ? event.y : event.x;
+            double main_coord = along(event.x, event.y);
             hovered_index = get_item_at(main_coord);
 
             // Start reorder if dragging past threshold
@@ -1356,65 +1305,57 @@ namespace Dokku {
                 } else {
                     // Back on dock — destroy popup and resume normal reorder
                     drag_float.destroy();
-                    reorder_insert_index = get_reorder_target_index(main_coord);
+                    reorder_insert_index = get_insert_index(main_coord);
                 }
             }
 
-            // Hover popup: multi-window apps get preview, others get name tooltip
-            if (hovered_index >= 0 && !is_reordering && !folder_popup.is_open) {
-                var hovered_item = items.nth_data(hovered_index);
-                if (hovered_item != null && hovered_item.is_media_widget && hovered_item.plugin is MediaPlugin) {
-                    // The now-playing popup opens once the pointer rests on the widget
-                    preview.cancel_timer();
-                    preview.dismiss();
-                    media_popup.request(hovered_item.plugin as MediaPlugin, hovered_index);
-                    schedule_redraw();
-                    return true;
-                }
-                media_popup.cancel_request();
-                media_popup.schedule_dismiss();
-                if (hovered_item != null && hovered_item.running && hovered_item.windows.length() > 1) {
-                    // Multi-window: window preview popup after 400ms
-                    if (preview.target_index != hovered_index) {
-                        preview.cancel_timer();
-                        preview.dismiss();
-                        preview.request(hovered_index, 400, true);
-                    } else {
-                        preview.cancel_dismiss();
-                    }
-                } else if (hovered_item != null && !hovered_item.is_separator
-                           && !hovered_item.is_media_widget) {
-                    // Single/zero-window or non-running: name tooltip after 300ms
-                    if (preview.target_index != hovered_index) {
-                        preview.cancel_timer();
-                        preview.dismiss();
-                        preview.request(hovered_index, 300, false);
-                    } else {
-                        preview.cancel_dismiss();
-                    }
-                } else {
-                    preview.cancel_timer();
-                    preview.dismiss();
-                }
-            } else {
-                preview.cancel_timer();
-                media_popup.cancel_request();
-                media_popup.schedule_dismiss();
-            }
-
+            update_hover_popups();
             schedule_redraw();
             return true;
         }
 
+        // The now-playing popup on the media widget, a window preview on an app with
+        // several windows, a name tooltip on anything else
+        private void update_hover_popups() {
+            DockItem? item = null;
+            if (hovered_index >= 0 && !is_reordering && !folder_popup.is_open) {
+                item = items.nth_data(hovered_index);
+            }
+            if (item == null) {
+                preview.cancel_timer();
+                media_popup.cancel_request();
+                media_popup.schedule_dismiss();
+                return;
+            }
+
+            if (item.is_media_widget && item.plugin is MediaPlugin) {
+                // The popup opens once the pointer rests on the widget
+                preview.cancel_timer();
+                preview.dismiss();
+                media_popup.request(item.plugin as MediaPlugin, hovered_index);
+                return;
+            }
+            media_popup.cancel_request();
+            media_popup.schedule_dismiss();
+
+            if (item.is_separator || item.is_media_widget) {
+                preview.cancel_timer();
+                preview.dismiss();
+            } else if (preview.target_index != hovered_index) {
+                bool windows = item.running && item.windows.length() > 1;
+                preview.cancel_timer();
+                preview.dismiss();
+                preview.request(hovered_index, windows ? 400 : 300, windows);
+            } else {
+                preview.cancel_dismiss();
+            }
+        }
+
         private bool on_enter(Gdk.EventCrossing event) {
             hovering = true;
-            if (hide_timeout_id != 0) { Source.remove(hide_timeout_id); hide_timeout_id = 0; }
-            if (launch_rehide_timeout_id != 0) { Source.remove(launch_rehide_timeout_id); launch_rehide_timeout_id = 0; }
+            cancel_hide_timers();
             media_popup.cancel_dismiss();
-            if ((auto_hide || dodge_hiding) && hidden) {
-                hidden = false;
-                animate_slide(0.0);
-            }
+            if ((auto_hide || dodge_hiding) && hidden) set_hidden(false);
             schedule_redraw();
             return true;
         }
@@ -1426,6 +1367,14 @@ namespace Dokku {
                 return true;
             }
 
+            pointer_left();
+            schedule_redraw();
+            return true;
+        }
+
+        // The pointer is no longer over the dock: stop hovering, close hover popups and,
+        // if the dock hides itself, start the countdown to hide
+        private void pointer_left() {
             hovering = false;
             mouse_x = -1;
             mouse_y = -1;
@@ -1436,17 +1385,18 @@ namespace Dokku {
             media_popup.cancel_request();
             media_popup.schedule_dismiss();
 
-            // Only hide if auto-hide or dodge-hiding is active
             if ((auto_hide || dodge_hiding) && !hidden) {
                 hide_timeout_id = Timeout.add(config.get_hide_delay(), () => {
-                    hidden = true;
-                    animate_slide(1.0);
                     hide_timeout_id = 0;
+                    set_hidden(true);
                     return false;
                 });
             }
-            schedule_redraw();
-            return true;
+        }
+
+        private void cancel_hide_timers() {
+            if (hide_timeout_id != 0) { Source.remove(hide_timeout_id); hide_timeout_id = 0; }
+            if (launch_rehide_timeout_id != 0) { Source.remove(launch_rehide_timeout_id); launch_rehide_timeout_id = 0; }
         }
 
         // What the drag in progress carries, found while it is still over the dock
@@ -1508,17 +1458,13 @@ namespace Dokku {
             dropping = false;
 
             // Anything dropped on the Trash goes into it
-            int over_drop = get_item_at(is_vertical ? (double) y : (double) x);
+            int over_drop = get_item_at(along(x, y));
             var over_drop_item = over_drop >= 0 ? items.nth_data(over_drop) : null;
             if (over_drop_item != null && over_drop_item.plugin is TrashPlugin && uris.length > 0) {
                 var trash_plugin = (TrashPlugin) over_drop_item.plugin;
                 int sent = trash_plugin.trash_uris(uris);
                 if (sent == 0) preview.flash(over_drop, "That can't be moved to the Trash", 1800);
-                clear_file_drop_state();
-                drop_insert_index = -1;
-                position_dock();
-                schedule_redraw();
-                Gtk.drag_finish(context, sent > 0, false, time);
+                finish_drop(context, sent > 0, time);
                 return;
             }
 
@@ -1528,7 +1474,7 @@ namespace Dokku {
                 if (!is_desktop_uri(uri)) files.append(uri);
             }
             if (files.length() > 0) {
-                int target = get_item_at(is_vertical ? (double) y : (double) x);
+                int target = get_item_at(along(x, y));
                 var target_item = target >= 0 ? items.nth_data(target) : null;
                 bool opened = false;
                 if (target_item != null && can_open_files_with(target_item)) {
@@ -1539,11 +1485,7 @@ namespace Dokku {
                         trigger_bounce(target_item.id, true);
                     }
                 }
-                clear_file_drop_state();
-                drop_insert_index = -1;
-                position_dock();
-                schedule_redraw();
-                Gtk.drag_finish(context, opened, false, time);
+                finish_drop(context, opened, time);
                 return;
             }
 
@@ -1578,11 +1520,32 @@ namespace Dokku {
                     items.append(item);
                 }
             }
-            drop_insert_index = -1;
             save_pinned_apps();
+            finish_drop(context, true, time);
+        }
+
+        private void finish_drop(Gdk.DragContext context, bool success, uint time) {
+            clear_file_drop_state();
+            drop_insert_index = -1;
             position_dock();
             schedule_redraw();
-            Gtk.drag_finish(context, true, false, time);
+            Gtk.drag_finish(context, success, false, time);
+        }
+
+        // Close the gap opened for a dragged launcher entry
+        private void close_drop_gap() {
+            if (drop_insert_index < 0) return;
+            drop_insert_index = -1;
+            position_dock();
+        }
+
+        // Treat the pointer as hovering item `index` (drag-over magnifies the target)
+        private void hover_for_drop(int index, int x, int y) {
+            drop_open_index = index;
+            hovering = true;
+            mouse_x = x;
+            mouse_y = y;
+            hovered_index = index;
         }
 
         private bool on_drag_motion(Gdk.DragContext context, int x, int y, uint time) {
@@ -1595,19 +1558,12 @@ namespace Dokku {
 
             // The Trash takes anything: it is the target, whatever is being dragged
             if (peek_ready && peek_any) {
-                int hover = get_item_at(is_vertical ? (double) y : (double) x);
+                int hover = get_item_at(along(x, y));
                 var hover_item = hover >= 0 ? items.nth_data(hover) : null;
                 if (hover_item != null && hover_item.plugin is TrashPlugin) {
-                    if (drop_insert_index >= 0) {
-                        drop_insert_index = -1;
-                        position_dock();
-                    }
+                    close_drop_gap();
                     Gdk.drag_status(context, Gdk.DragAction.COPY, time);
-                    drop_open_index = hover;
-                    hovering = true;
-                    mouse_x = x;
-                    mouse_y = y;
-                    hovered_index = hover;
+                    hover_for_drop(hover, x, y);
                     schedule_redraw();
                     return true;
                 }
@@ -1615,20 +1571,12 @@ namespace Dokku {
 
             // Files, not .desktop entries: the icon under the pointer is the target
             if (peek_ready && peek_has_files) {
-                if (drop_insert_index >= 0) {
-                    drop_insert_index = -1;
-                    position_dock();
-                }
-                int over = get_item_at(is_vertical ? (double) y : (double) x);
+                close_drop_gap();
+                int over = get_item_at(along(x, y));
                 var over_item = over >= 0 ? items.nth_data(over) : null;
                 if (over_item != null && can_open_files_with(over_item)) {
                     Gdk.drag_status(context, Gdk.DragAction.COPY, time);
-                    drop_open_index = over;
-                    // The hover magnification marks the target
-                    hovering = true;
-                    mouse_x = x;
-                    mouse_y = y;
-                    hovered_index = over;
+                    hover_for_drop(over, x, y);  // the hover magnification marks the target
                 } else {
                     Gdk.drag_status(context, 0, time);
                     if (drop_open_index >= 0) {
@@ -1648,7 +1596,7 @@ namespace Dokku {
             }
 
             Gdk.drag_status(context, Gdk.DragAction.COPY, time);
-            int new_index = get_drop_index(is_vertical ? (double)y : (double)x);
+            int new_index = get_insert_index(along(x, y));
             if (new_index != drop_insert_index) {
                 drop_insert_index = new_index;
                 position_dock();
@@ -1660,66 +1608,31 @@ namespace Dokku {
         private void on_drag_leave(Gdk.DragContext context, uint time) {
             clear_file_drop_state();
             if (drop_insert_index >= 0) {
-                drop_insert_index = -1;
-                position_dock();
+                close_drop_gap();
                 schedule_redraw();
             }
         }
 
-        private int get_drop_index(double x) {
+        // The slot a dragged icon would drop into: between the launcher and the separator,
+        // before the first item whose middle is past the pointer
+        private int get_insert_index(double x) {
             int sep_idx = find_separator_index();
-            int max_insert = sep_idx >= 0 ? sep_idx : (int)items.length();
-            int min_insert = 1;  // After launcher
+            int max_insert = sep_idx >= 0 ? sep_idx : (int) items.length();
+            const int MIN_INSERT = 1;  // after the launcher
 
-            int width = is_vertical ? get_allocated_height() : get_allocated_width();
-            double total_width = 0;
+            // While a file is dragged over the dock a gap is open at drop_insert_index
+            bool gap_open = drop_insert_index >= 0;
             double gap_width = renderer.spacing * 2;
-
-            foreach (var item in items) {
-                total_width += item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
-            }
-            if (drop_insert_index >= 0) total_width += gap_width;
-
-            double pos = (width - total_width) / 2.0;
+            double pos = rest_origin(gap_open ? gap_width : 0);
             int i = 0;
             foreach (var item in items) {
                 // Cursor within existing gap → keep current index (prevents jitter)
-                if (drop_insert_index >= 0 && i == drop_insert_index) {
+                if (gap_open && i == drop_insert_index) {
                     if (x < pos + gap_width) return i;
                     pos += gap_width;
                 }
-                double w = item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
-                if (i >= min_insert && i <= max_insert && x < pos + w / 2.0) {
-                    return i;
-                }
-                pos += w;
-                i++;
-            }
-            return max_insert;
-        }
-
-        private int get_reorder_target_index(double x) {
-            int min_insert = 1;  // After launcher
-            int sep_idx = find_separator_index();
-            int max_insert = sep_idx >= 0 ? sep_idx : (int)items.length();
-
-            int width = is_vertical ? get_allocated_height() : get_allocated_width();
-            double total_width = 0;
-            foreach (var item in items) {
-                total_width += item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
-            }
-
-            double pos = (width - total_width) / 2.0;
-            int i = 0;
-            foreach (var item in items) {
-                double w = item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
-                if (i >= min_insert && i <= max_insert) {
-                    if (x < pos + w / 2.0) return i;
-                }
+                double w = item_length(item);
+                if (i >= MIN_INSERT && i <= max_insert && x < pos + w / 2.0) return i;
                 pos += w;
                 i++;
             }
@@ -1768,7 +1681,7 @@ namespace Dokku {
 
         private bool on_button_press(Gdk.EventButton event) {
             if (is_reordering) return true;  // Ignore during active drag
-            double main_coord = is_vertical ? event.y : event.x;
+            double main_coord = along(event.x, event.y);
 
             // A click on the dock closes an open folder popup, and hides any tooltip
             folder_closed_by_press = folder_popup.open_index;
@@ -1816,7 +1729,7 @@ namespace Dokku {
             if (event.time != 0 && event.time == last_scroll_time) return true;
             last_scroll_time = event.time;
             if (is_reordering) return true;
-            double main_coord = is_vertical ? event.y : event.x;
+            double main_coord = along(event.x, event.y);
             int index = get_item_at(main_coord);
             if (index < 0) return false;
             var item = items.nth_data(index);
@@ -1881,10 +1794,15 @@ namespace Dokku {
 
         // Whether the app's window is the one with focus
         private bool is_app_active(DockItem item) {
+            return active_app_id() == item.id;
+        }
+
+        // The id of the app that owns the focused window, or null
+        private string? active_app_id() {
             var active = wm.get_active_window();
-            if (active == null) return false;
+            if (active == null) return null;
             var app = app_manager.find_by_window(active);
-            return app != null && app.id == item.id;
+            return app != null ? app.id : null;
         }
 
         private bool on_button_release(Gdk.EventButton event) {
@@ -1894,7 +1812,7 @@ namespace Dokku {
                 seat.ungrab();
             }
 
-            double main_coord = is_vertical ? event.y : event.x;
+            double main_coord = along(event.x, event.y);
             if (event.button == 2 && middle_index >= 0) {
                 if (get_item_at(main_coord) == middle_index) middle_activate_item(middle_index);
                 middle_index = -1;
@@ -1953,21 +1871,7 @@ namespace Dokku {
             int alloc_w = get_allocated_width();
             int alloc_h = get_allocated_height();
             if (event.x < 0 || event.x > alloc_w || event.y < 0 || event.y > alloc_h) {
-                hovering = false;
-                mouse_x = -1;
-                mouse_y = -1;
-                hovered_index = -1;
-                preview.cancel_timer();
-                preview.schedule_dismiss();
-                media_popup.schedule_dismiss();
-                if ((auto_hide || dodge_hiding) && !hidden) {
-                    hide_timeout_id = Timeout.add(config.get_hide_delay(), () => {
-                        hidden = true;
-                        animate_slide(1.0);
-                        hide_timeout_id = 0;
-                        return false;
-                    });
-                }
+                pointer_left();
             }
 
             schedule_redraw();
@@ -1979,25 +1883,32 @@ namespace Dokku {
             return item.dock_width_factor;
         }
 
+        // How much of the dock's axis `item` takes up, spacing included, with its icon
+        // magnified by `scale`. A separator is a line and doesn't scale.
+        private double item_length(DockItem item, double scale = 1.0) {
+            if (item.is_separator) return SEPARATOR_LINE + renderer.spacing;
+            return renderer.icon_size * effective_width_factor(item) * scale + renderer.spacing;
+        }
+
+        // The pointer coordinate that runs along the dock
+        private double along(double x, double y) {
+            return is_vertical ? y : x;
+        }
+
+        // Where the first item starts along the axis when nothing is magnified, with
+        // `extra` of room (an open drop gap) added to the content
+        private double rest_origin(double extra = 0) {
+            double total = extra;
+            foreach (var item in items) total += item_length(item);
+            int axis = is_vertical ? get_allocated_height() : get_allocated_width();
+            return (axis - total) / 2.0;
+        }
+
         private int get_item_at(double click_x) {
-            int width = is_vertical ? get_allocated_height() : get_allocated_width();
-
-            // Calculate total width first
-            double total_width = 0;
-            foreach (var item in items) {
-                if (item.is_separator) {
-                    total_width += SEPARATOR_WIDTH;
-                } else {
-                    total_width += renderer.icon_size * effective_width_factor(item) + renderer.spacing;
-                }
-            }
-
-            double start_x = (width - total_width) / 2.0;
-            double pos = start_x;
+            double pos = rest_origin();
             int i = 0;
             foreach (var item in items) {
-                double w = item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
+                double w = item_length(item);
                 if (click_x >= pos && click_x < pos + w) return i;
                 pos += w;
                 i++;
@@ -2051,32 +1962,17 @@ namespace Dokku {
                     wm.activate_window(window);
                 }
             } else {
-                var app = app_manager.get_app(item.id);
-                if (app != null) {
-                    usage_tracker.record_launch(item.id);
-                    app.launch();
-                    trigger_bounce(item.id, true);
-                }
+                launch_new_window(item);
             }
         }
 
         private void get_item_bounds(int target_index, out double start_x, out double item_width) {
-            int width = is_vertical ? get_allocated_height() : get_allocated_width();
-            double total_width = 0;
-            foreach (var item in items) {
-                if (item.is_separator) {
-                    total_width += SEPARATOR_WIDTH;
-                } else {
-                    total_width += renderer.icon_size * effective_width_factor(item) + renderer.spacing;
-                }
-            }
-            double pos = (width - total_width) / 2.0;
+            double pos = rest_origin();
             int i = 0;
             start_x = pos;
             item_width = 0;
             foreach (var item in items) {
-                double w = item.is_separator ? SEPARATOR_WIDTH :
-                    (renderer.icon_size * effective_width_factor(item) + renderer.spacing);
+                double w = item_length(item);
                 if (i == target_index) {
                     start_x = pos;
                     item_width = w;
@@ -2099,7 +1995,7 @@ namespace Dokku {
         }
 
         private void show_context_menu(Gdk.EventButton event) {
-            int index = get_item_at(is_vertical ? event.y : event.x);
+            int index = get_item_at(along(event.x, event.y));
             if (index < 0) return;
             var item = items.nth_data(index);
             if (item == null) return;
@@ -2109,148 +2005,110 @@ namespace Dokku {
                 if (m != null) { m.popup_at_pointer(event); return; }
             }
 
-            // Folder context menu
+            // Kept in a field: a menu nothing else refers to is destroyed while it is open
+            context_menu = new Gtk.Menu();
             if (item.is_folder) {
-                context_menu = new Gtk.Menu();
-                var rename_mi = new Gtk.MenuItem.with_label("Rename Folder...");
-                rename_mi.activate.connect(() => show_rename_folder_dialog(item));
-                context_menu.append(rename_mi);
-
-                var delete_mi = new Gtk.MenuItem.with_label("Delete Folder");
-                delete_mi.activate.connect(() => {
+                MenuUtil.add_item(context_menu, "Rename Folder...", () => show_rename_folder_dialog(item));
+                MenuUtil.add_item(context_menu, "Delete Folder", () => {
                     config.delete_folder(item.folder_id);
                     items.remove(item);
                     save_pinned_apps();
                     position_dock();
                     schedule_redraw();
                 });
-                context_menu.append(delete_mi);
-
-                context_menu.append(new Gtk.SeparatorMenuItem());
-                var st = new Gtk.MenuItem.with_label("Dock Settings...");
-                st.activate.connect(() => settings_requested());
-                context_menu.append(st);
-
-                context_menu.show_all();
-                context_menu.popup_at_pointer(event);
-                return;
+                MenuUtil.add_separator(context_menu);
+                MenuUtil.add_item(context_menu, "Dock Settings...", () => settings_requested());
+            } else if (item.is_launcher) {
+                // Dock Settings lives only on the Applications button
+                MenuUtil.add_item(context_menu, "Dock Settings...", () => settings_requested());
+            } else {
+                build_app_menu(context_menu, item, (event.state & Gdk.ModifierType.SHIFT_MASK) != 0);
             }
+            MenuUtil.popup(context_menu, event);
+        }
 
-            context_menu = new Gtk.Menu();
-
-            // Dock Settings lives only on the Applications button
-            if (item.is_launcher) {
-                var st = new Gtk.MenuItem.with_label("Dock Settings...");
-                st.activate.connect(() => settings_requested());
-                context_menu.append(st);
-                context_menu.show_all();
-                context_menu.popup_at_pointer(event);
-                return;
-            }
-
+        private void build_app_menu(Gtk.Menu menu, DockItem item, bool shift_held) {
             if (item.running) {
-                var nw = new Gtk.MenuItem.with_label("New Window");
-                nw.activate.connect(() => launch_new_window(item));
-                context_menu.append(nw);
+                MenuUtil.add_item(menu, "New Window", () => launch_new_window(item));
             }
 
-            // Recent files submenu
-            if (item.desktop_file != null && item.desktop_file != "") {
+            bool has_desktop_file = item.desktop_file != null && item.desktop_file != "";
+            if (has_desktop_file) {
                 var recent_submenu = RecentFilesMenu.build(item, app_manager, this);
                 if (recent_submenu != null) {
                     var recent_mi = new Gtk.MenuItem.with_label("Recent Files");
                     recent_mi.submenu = recent_submenu;
-                    context_menu.append(recent_mi);
+                    menu.append(recent_mi);
                 }
             }
-
-            if (item.running || (item.desktop_file != null && item.desktop_file != "")) {
-                context_menu.append(new Gtk.SeparatorMenuItem());
-            }
+            if (item.running || has_desktop_file) MenuUtil.add_separator(menu);
 
             var options = new Gtk.Menu();
             if (item.pinned) {
-                var unpin = new Gtk.MenuItem.with_label("Unpin from Dock");
-                unpin.activate.connect(() => {
+                MenuUtil.add_item(options, "Unpin from Dock", () => {
                     if (item.running) item.pinned = false; else items.remove(item);
-                    save_pinned_apps(); schedule_redraw();
+                    save_pinned_apps();
+                    schedule_redraw();
                 });
-                options.append(unpin);
             } else {
-                var pin = new Gtk.MenuItem.with_label("Pin to Dock");
-                pin.activate.connect(() => { item.pinned = true; save_pinned_apps(); schedule_redraw(); });
-                options.append(pin);
+                MenuUtil.add_item(options, "Pin to Dock", () => {
+                    item.pinned = true;
+                    save_pinned_apps();
+                    schedule_redraw();
+                });
             }
-            var props = new Gtk.MenuItem.with_label("Properties...");
-            props.activate.connect(() => properties_dialog.show(item));
-            options.append(props);
+            MenuUtil.add_item(options, "Properties...", () => properties_dialog.show(item));
             var options_mi = new Gtk.MenuItem.with_label("Options");
             options_mi.submenu = options;
-            context_menu.append(options_mi);
+            menu.append(options_mi);
 
-            if (item.running && item.windows.length() > 0) {
-                context_menu.append(new Gtk.SeparatorMenuItem());
-                var hide = new Gtk.MenuItem.with_label("Hide");
-                hide.activate.connect(() => {
-                    foreach (var window in item.windows) {
-                        if (!window.is_minimized) window.minimize();
+            if (!item.running || item.windows.length() == 0) return;
+            MenuUtil.add_separator(menu);
+            MenuUtil.add_item(menu, "Hide", () => {
+                foreach (var window in item.windows) {
+                    if (!window.is_minimized) window.minimize();
+                }
+            });
+            MenuUtil.add_item(menu, "Quit", () => AppQuit.quit.begin(item.id, item.windows));
+
+            // Force Close only shows when Shift is held as the menu opens. Wayland doesn't
+            // tell us another window's PID, so there it has nothing to kill.
+            if (shift_held && item.windows.nth_data(0).get_pid() > 0) {
+                MenuUtil.add_item(menu, "Force Close", () => {
+                    var window = item.windows.nth_data(0);
+                    if (window != null && window.get_pid() > 0) {
+                        Posix.kill(window.get_pid(), Posix.Signal.KILL);
                     }
                 });
-                context_menu.append(hide);
-
-                var quit = new Gtk.MenuItem.with_label("Quit");
-                quit.activate.connect(() => AppQuit.quit.begin(item.id, item.windows));
-                context_menu.append(quit);
-
-                // Force Close only shows when Shift is held as the menu opens. Wayland doesn't
-                // tell us another window's PID, so there it has nothing to kill.
-                if ((event.state & Gdk.ModifierType.SHIFT_MASK) != 0 &&
-                    item.windows.nth_data(0).get_pid() > 0) {
-                    var force_close = new Gtk.MenuItem.with_label("Force Close");
-                    force_close.activate.connect(() => {
-                        var window = item.windows.nth_data(0);
-                        if (window != null) {
-                            int pid = window.get_pid();
-                            if (pid > 0) {
-                                Posix.kill(pid, Posix.Signal.KILL);
-                            }
-                        }
-                    });
-                    context_menu.append(force_close);
-                }
             }
-
-            context_menu.show_all();
-            context_menu.popup_at_pointer(event);
         }
 
         private void on_notification(string app_id) {
             if (notification_monitor == null) return;
+            var item = find_item(app_id);
+            if (item == null) return;
+            item.notification_count = notification_monitor.get_count(app_id);
+            schedule_redraw();
+            // Also trigger bounce for the notification
+            trigger_bounce(app_id);
+        }
+
+        private DockItem? find_item(string id) {
             foreach (var item in items) {
-                if (item.id == app_id) {
-                    item.notification_count = notification_monitor.get_count(app_id);
-                    schedule_redraw();
-                    // Also trigger bounce for the notification
-                    trigger_bounce(app_id);
-                    return;
-                }
+                if (item.id == id) return item;
             }
+            return null;
         }
 
         private void clear_badge_for_focused_app() {
             if (notification_monitor == null) return;
-            var active = wm.get_active_window();
-            if (active == null) return;
-            var app = app_manager.find_by_window(active);
-            if (app == null) return;
-            notification_monitor.clear(app.id);
-            foreach (var item in items) {
-                if (item.id == app.id) {
-                    item.notification_count = 0;
-                    schedule_redraw();
-                    return;
-                }
-            }
+            string? active_id = active_app_id();
+            if (active_id == null) return;
+            notification_monitor.clear(active_id);
+            var item = find_item(active_id);
+            if (item == null) return;
+            item.notification_count = 0;
+            schedule_redraw();
         }
 
         public void reload_settings() {
@@ -2304,8 +2162,7 @@ namespace Dokku {
                 dock_slide_offset = 0.0;
             } else if (auto_hide && !hovering && !hidden) {
                 // Auto-hide just enabled — hide immediately
-                hidden = true;
-                animate_slide(1.0);
+                set_hidden(true);
             }
 
             // If dodge_windows enabled, schedule a check (hides only if overlap found)
@@ -2357,13 +2214,7 @@ namespace Dokku {
 
             // For notification/attention bounces, don't bounce if the app is already focused.
             // For launch bounces, always bounce (the app just started — user needs feedback).
-            if (!is_launch) {
-                var active = wm.get_active_window();
-                if (active != null) {
-                    var active_app = app_manager.find_by_window(active);
-                    if (active_app != null && active_app.id == app_id) return;
-                }
-            }
+            if (!is_launch && active_app_id() == app_id) return;
 
             // Per-app cooldown: suppress repeated bounces within 5 seconds
             int64 now = GLib.get_monotonic_time();
@@ -2373,52 +2224,36 @@ namespace Dokku {
             }
             bounce_cooldowns.set(app_id, now);
 
-            foreach (var item in items) {
-                if (item.id == app_id) {
-                    item.is_bouncing = true;
-                    item.bounce_is_launch = is_launch;
-                    item.bounce_start_time = now;
-                    start_bounce_tick();
+            var item = find_item(app_id);
+            if (item == null) return;
+            item.is_bouncing = true;
+            item.bounce_is_launch = is_launch;
+            item.bounce_start_time = now;
+            start_bounce_tick();
 
-                    // When hiding and the dock is hidden, slide it up so the
-                    // user sees the launch bounce, then re-hide after bounce + 1s.
-                    if (is_launch && (auto_hide || dodge_hiding) && hidden) {
-                        hidden = false;
-                        animate_slide(0.0);
-                        if (launch_rehide_timeout_id != 0) Source.remove(launch_rehide_timeout_id);
-                        launch_rehide_timeout_id = Timeout.add(2000, () => {
-                            launch_rehide_timeout_id = 0;
-                            if ((auto_hide || dodge_hiding) && !hovering && !hidden) {
-                                hidden = true;
-                                animate_slide(1.0);
-                            }
-                            return false;
-                        });
-                    }
-
-                    return;
-                }
+            // When hiding and the dock is hidden, slide it up so the
+            // user sees the launch bounce, then re-hide after bounce + 1s.
+            if (is_launch && (auto_hide || dodge_hiding) && hidden) {
+                set_hidden(false);
+                if (launch_rehide_timeout_id != 0) Source.remove(launch_rehide_timeout_id);
+                launch_rehide_timeout_id = Timeout.add(2000, () => {
+                    launch_rehide_timeout_id = 0;
+                    if ((auto_hide || dodge_hiding) && !hovering && !hidden) set_hidden(true);
+                    return false;
+                });
             }
         }
 
         private void clear_bounce_for_focused_app() {
-            var active = wm.get_active_window();
-            if (active == null) return;
-            var app = app_manager.find_by_window(active);
-            if (app == null) return;
-            foreach (var item in items) {
-                if (item.id == app.id && item.is_bouncing) {
-                    // Launch bounces must play for a minimum duration so the user
-                    // sees the feedback, even if the app takes focus immediately.
-                    // Notification bounces clear instantly on focus.
-                    if (item.bounce_is_launch) {
-                        double elapsed = (GLib.get_monotonic_time() - item.bounce_start_time) / 1000000.0;
-                        if (elapsed < 1.5) break;  // let it keep bouncing
-                    }
-                    item.is_bouncing = false;
-                    break;
-                }
-            }
+            string? active_id = active_app_id();
+            if (active_id == null) return;
+            var item = find_item(active_id);
+            if (item == null || !item.is_bouncing) return;
+            // Launch bounces must play for a minimum duration so the user
+            // sees the feedback, even if the app takes focus immediately.
+            // Notification bounces clear instantly on focus.
+            if (item.bounce_is_launch && item.bounce_elapsed(GLib.get_monotonic_time()) < DockItem.BOUNCE_SECONDS) return;
+            item.is_bouncing = false;
         }
 
         private void start_bounce_tick() {
@@ -2427,13 +2262,11 @@ namespace Dokku {
                 bool any_bouncing = false;
                 int64 now = frame_clock.get_frame_time();
                 foreach (var item in items) {
-                    if (item.is_bouncing) {
-                        double elapsed = (now - item.bounce_start_time) / 1000000.0;
-                        if (elapsed > 1.5) {
-                            item.is_bouncing = false;
-                        } else {
-                            any_bouncing = true;
-                        }
+                    if (!item.is_bouncing) continue;
+                    if (item.bounce_elapsed(now) > DockItem.BOUNCE_SECONDS) {
+                        item.is_bouncing = false;
+                    } else {
+                        any_bouncing = true;
                     }
                 }
                 queue_draw();
@@ -2448,18 +2281,13 @@ namespace Dokku {
         // --- Progress bar ---
 
         private void on_progress_changed(string app_id, double progress, bool visible) {
-            foreach (var item in items) {
-                if (item.id == app_id) {
-                    item.progress_value = progress;
-                    item.progress_visible = visible;
-                    // Start animation tick for indeterminate (spinning) progress
-                    if (visible && progress < 0.0) {
-                        start_progress_tick();
-                    }
-                    schedule_redraw();
-                    return;
-                }
-            }
+            var item = find_item(app_id);
+            if (item == null) return;
+            item.progress_value = progress;
+            item.progress_visible = visible;
+            // Start animation tick for indeterminate (spinning) progress
+            if (visible && progress < 0.0) start_progress_tick();
+            schedule_redraw();
         }
 
         private void start_progress_tick() {

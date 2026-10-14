@@ -195,15 +195,13 @@ namespace Dokku {
 
             // Bounce animation offset (bounce away from screen edge)
             if (item.is_bouncing) {
-                int64 now = GLib.get_monotonic_time();
-                double elapsed = (now - item.bounce_start_time) / 1000000.0;
-                if (elapsed < 1.5) {
-                    double damping = 1.0 - (elapsed / 1.5);
+                double elapsed = item.bounce_elapsed(GLib.get_monotonic_time());
+                if (elapsed < DockItem.BOUNCE_SECONDS) {
+                    double damping = 1.0 - (elapsed / DockItem.BOUNCE_SECONDS);
                     double bounce_offset = (double)icon_size * 0.4 * damping * Math.fabs(Math.sin(elapsed * 4.0 * Math.PI));
-                    if (position == "bottom") y -= bounce_offset;
-                    else if (position == "top") y += bounce_offset;
-                    else if (position == "left") x += bounce_offset;
-                    else x -= bounce_offset;  // right
+                    // Away from the screen edge
+                    x -= edge_x(position) * bounce_offset;
+                    y -= edge_y(position) * bounce_offset;
                 }
             }
 
@@ -245,33 +243,10 @@ namespace Dokku {
 
             // Running indicator dots (dark dots on light themes, light dots on dark themes)
             if (item.running) {
-                if (theme != null) {
-                    cr.set_source_rgba(theme.indicator_red, theme.indicator_green,
-                                       theme.indicator_blue, theme.indicator_alpha);
-                } else if (is_light_theme()) {
-                    cr.set_source_rgba(0.12, 0.12, 0.14, 0.90);  // Charcoal
-                } else {
-                    cr.set_source_rgba(1, 1, 1, 0.4);
-                }
-
-                int window_count = (int)item.windows.length();
-                int dots = int.min(window_count, 3);
-                double dot_spacing = 5;
-
+                set_indicator_color(cr);
+                int dots = int.min((int) item.windows.length(), 3);
                 for (int i = 0; i < dots; i++) {
-                    double dot_offset = (i - (dots - 1) / 2.0) * dot_spacing;
-                    double dx, dy;
-                    if (position == "bottom") {
-                        dx = x + dot_offset; dy = y + size / 2.0 + 6;
-                    } else if (position == "top") {
-                        dx = x + dot_offset; dy = y - size / 2.0 - 6;
-                    } else if (position == "left") {
-                        dx = x - size / 2.0 - 6; dy = y + dot_offset;
-                    } else { // right
-                        dx = x + size / 2.0 + 6; dy = y + dot_offset;
-                    }
-                    cr.arc(dx, dy, 2.0, 0, 2 * Math.PI);
-                    cr.fill();
+                    draw_indicator_dot(cr, x, y, size, position, (i - (dots - 1) / 2.0) * 5);
                 }
             }
 
@@ -320,22 +295,15 @@ namespace Dokku {
 
             // Progress bar overlay (along the edge side of the icon)
             if (item.progress_visible) {
-                double bar_len = (double)size;
                 double bar_thick = 3;
                 double bar_radius = bar_thick / 2.0;
-                double bar_x, bar_y, bar_w, bar_h;
-
-                if (vert) {
-                    // Vertical bar alongside icon
-                    bar_w = bar_thick; bar_h = bar_len;
-                    bar_y = y - bar_len / 2.0;
-                    bar_x = (position == "left") ? x - size / 2.0 - 5 : x + size / 2.0 + 2;
-                } else {
-                    // Horizontal bar below/above icon
-                    bar_w = bar_len; bar_h = bar_thick;
-                    bar_x = x - bar_len / 2.0;
-                    bar_y = (position == "top") ? y - size / 2.0 - 5 : y + size / 2.0 + 2;
-                }
+                // Beside the icon on a vertical dock, below or above it otherwise
+                double bar_x = vert ? (position == "left" ? x - size / 2.0 - 5 : x + size / 2.0 + 2)
+                                    : x - size / 2.0;
+                double bar_y = vert ? y - size / 2.0
+                                    : (position == "top" ? y - size / 2.0 - 5 : y + size / 2.0 + 2);
+                double bar_w = vert ? bar_thick : size;
+                double bar_h = vert ? size : bar_thick;
 
                 // Track background
                 draw_rounded_rect(cr, bar_x, bar_y, bar_w, bar_h, bar_radius);
@@ -350,26 +318,49 @@ namespace Dokku {
                 if (item.progress_value >= 0.0) {
                     progress_frac = item.progress_value.clamp(0.0, 1.0);
                 } else {
-                    int64 now = GLib.get_monotonic_time();
-                    progress_frac = (now % 2000000) / 2000000.0;
+                    progress_frac = (GLib.get_monotonic_time() % 2000000) / 2000000.0;
                 }
 
-                if (vert) {
-                    double fill_h = bar_len * progress_frac;
-                    if (fill_h > bar_radius * 2) {
-                        draw_rounded_rect(cr, bar_x, bar_y, bar_w, fill_h, bar_radius);
-                        cr.set_source_rgba(0.2, 0.6, 1.0, 0.9);
-                        cr.fill();
-                    }
-                } else {
-                    double fill_w = bar_len * progress_frac;
-                    if (fill_w > bar_radius * 2) {
-                        draw_rounded_rect(cr, bar_x, bar_y, fill_w, bar_h, bar_radius);
-                        cr.set_source_rgba(0.2, 0.6, 1.0, 0.9);
-                        cr.fill();
-                    }
+                double fill = size * progress_frac;
+                if (fill > bar_radius * 2) {
+                    draw_rounded_rect(cr, bar_x, bar_y, vert ? bar_w : fill, vert ? fill : bar_h, bar_radius);
+                    cr.set_source_rgba(0.2, 0.6, 1.0, 0.9);
+                    cr.fill();
                 }
             }
+        }
+
+        // Which way the screen edge lies from the dock's centre, as a unit step
+        private static double edge_x(string position) {
+            return position == "left" ? -1.0 : (position == "right" ? 1.0 : 0.0);
+        }
+
+        private static double edge_y(string position) {
+            return position == "top" ? -1.0 : (position == "bottom" ? 1.0 : 0.0);
+        }
+
+        // The theme's indicator colour (running dots, drop gap), or a plain one that
+        // suits the theme's brightness when there is no theme
+        public void set_indicator_color(Cairo.Context cr, double alpha = -1) {
+            if (theme != null) {
+                cr.set_source_rgba(theme.indicator_red, theme.indicator_green, theme.indicator_blue,
+                                   alpha >= 0 ? alpha : theme.indicator_alpha);
+            } else if (is_light_theme()) {
+                cr.set_source_rgba(0.12, 0.12, 0.14, alpha >= 0 ? alpha : 0.90);
+            } else {
+                cr.set_source_rgba(1, 1, 1, alpha >= 0 ? alpha : 0.4);
+            }
+        }
+
+        // A dot just outside the icon (centred at x, y, `size` wide) on the side facing
+        // the screen edge, `along` pixels off-centre
+        private static void draw_indicator_dot(Cairo.Context cr, double x, double y, double size,
+                                               string position, double along = 0) {
+            double reach = size / 2.0 + 6;
+            bool vert = position == "left" || position == "right";
+            cr.arc(x + edge_x(position) * reach + (vert ? 0 : along),
+                   y + edge_y(position) * reach + (vert ? along : 0), 2.0, 0, 2 * Math.PI);
+            cr.fill();
         }
 
         private void draw_widget_text(Cairo.Context cr, string raw_text, double x, double y, int size) {
@@ -411,38 +402,73 @@ namespace Dokku {
             });
         }
 
+        // The theme's dock background colour (a dark grey without a theme)
+        private void set_background_color(Cairo.Context cr, double alpha) {
+            if (theme != null) {
+                cr.set_source_rgba(theme.bg_red, theme.bg_green, theme.bg_blue, alpha);
+            } else {
+                cr.set_source_rgba(0.2, 0.2, 0.2, alpha);
+            }
+        }
+
+        private void paint_icon(Cairo.Context cr, string icon_name, int size, double x, double y) {
+            var pixbuf = get_icon(icon_name, size);
+            if (pixbuf == null) return;
+            Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y);
+            cr.paint();
+        }
+
+        // Album art filling the square at (x, y), or a music note on the dock's colour when
+        // the player has none. The caller clips it to the rounded shape.
+        private void paint_album_art(Cairo.Context cr, MediaPlugin mp, double x, double y, int size) {
+            var art = mp.get_art(size);
+            if (art != null) {
+                Gdk.cairo_set_source_pixbuf(cr, art, x, y);
+                cr.paint();
+                return;
+            }
+            set_background_color(cr, 0.6);
+            cr.paint();
+            int note = size / 2;
+            paint_icon(cr, "audio-x-generic-symbolic", note, x + (size - note) / 2.0, y + (size - note) / 2.0);
+        }
+
+        // A media control button; hovering tints the icon itself (ATOP keeps it inside
+        // the icon's shape). Dark theme: icons are light, so overlay the dock colour to
+        // darken them. Light theme: icons are dark, so overlay white to lighten them.
+        private void draw_media_control(Cairo.Context cr, string icon_name, int size,
+                                        double x, double y, bool hovered) {
+            var pixbuf = get_icon(icon_name, size);
+            if (pixbuf == null) return;
+            cr.push_group();
+            Gdk.cairo_set_source_pixbuf(cr, pixbuf, x, y);
+            cr.paint();
+            if (hovered) {
+                cr.set_operator(Cairo.Operator.ATOP);
+                if (is_light_theme()) {
+                    cr.set_source_rgba(1, 1, 1, 0.2);
+                } else {
+                    set_background_color(cr, 0.5);
+                }
+                cr.paint();
+                cr.set_operator(Cairo.Operator.OVER);
+            }
+            cr.pop_group_to_source();
+            cr.paint();
+        }
+
         private void draw_media_compact(Cairo.Context cr, MediaPlugin mp,
                                         double x, double y, int size, string position,
                                         bool hovered = false) {
             double rx = x - size / 2.0;
             double ry = y - size / 2.0;
-            double radius = size * 0.18;
 
             // Album art clipped to rounded square, with hover brightening
             cr.push_group();
             cr.save();
-            draw_rounded_rect(cr, rx, ry, size, size, radius);
+            draw_rounded_rect(cr, rx, ry, size, size, size * 0.18);
             cr.clip();
-
-            var art = mp.get_art(size);
-            if (art != null) {
-                Gdk.cairo_set_source_pixbuf(cr, art, rx, ry);
-                cr.paint();
-            } else {
-                // Dark background with fallback music icon
-                double bg_r = 0.2, bg_g = 0.2, bg_b = 0.2;
-                if (theme != null) { bg_r = theme.bg_red; bg_g = theme.bg_green; bg_b = theme.bg_blue; }
-                cr.set_source_rgba(bg_r, bg_g, bg_b, 0.6);
-                cr.paint();
-                int fallback_sz = size / 2;
-                var fb = get_icon("audio-x-generic-symbolic", fallback_sz);
-                if (fb != null) {
-                    Gdk.cairo_set_source_pixbuf(cr, fb,
-                        rx + (size - fallback_sz) / 2.0,
-                        ry + (size - fallback_sz) / 2.0);
-                    cr.paint();
-                }
-            }
+            paint_album_art(cr, mp, rx, ry, size);
             if (hovered) {
                 cr.set_source_rgba(1, 1, 1, 0.18);
                 cr.paint();
@@ -460,30 +486,11 @@ namespace Dokku {
                 cr.arc(bx + badge_sz / 2.0, by + badge_sz / 2.0, badge_sz / 2.0 + 2, 0, 2 * Math.PI);
                 cr.set_source_rgba(0, 0, 0, 0.5);
                 cr.fill();
-                var play_icon = get_icon("media-playback-pause-symbolic", badge_sz);
-                if (play_icon != null) {
-                    Gdk.cairo_set_source_pixbuf(cr, play_icon, bx, by);
-                    cr.paint();
-                }
+                paint_icon(cr, "media-playback-pause-symbolic", badge_sz, bx, by);
             }
 
-            // Indicator dot (position-aware, toward screen edge)
-            if (theme != null) {
-                cr.set_source_rgba(theme.indicator_red, theme.indicator_green,
-                                   theme.indicator_blue, theme.indicator_alpha);
-            } else if (is_light_theme()) {
-                cr.set_source_rgba(0.12, 0.12, 0.14, 0.90);
-            } else {
-                cr.set_source_rgba(1, 1, 1, 0.4);
-            }
-            double dx, dy;
-            if (position == "left") {
-                dx = x - size / 2.0 - 6; dy = y;
-            } else {
-                dx = x + size / 2.0 + 6; dy = y;
-            }
-            cr.arc(dx, dy, 2.0, 0, 2 * Math.PI);
-            cr.fill();
+            set_indicator_color(cr);
+            draw_indicator_dot(cr, x, y, size, position);
         }
 
         private void draw_media_widget(Cairo.Context cr, MediaPlugin mp,
@@ -495,20 +502,17 @@ namespace Dokku {
             double rx = x - widget_w / 2.0;
             double ry = y - widget_h / 2.0;
             double pad = 6;
-            double pill_radius = 10;
 
             // Theme-derived colors (fallback to white-on-dark defaults)
             double fg_r = 1, fg_g = 1, fg_b = 1;
             double pill_r = 1, pill_g = 1, pill_b = 1;
-            double bg_r = 0.2, bg_g = 0.2, bg_b = 0.2;
             if (theme != null) {
                 fg_r = theme.indicator_red; fg_g = theme.indicator_green; fg_b = theme.indicator_blue;
                 pill_r = theme.border_red; pill_g = theme.border_green; pill_b = theme.border_blue;
-                bg_r = theme.bg_red; bg_g = theme.bg_green; bg_b = theme.bg_blue;
             }
 
             // Rounded-rect overlay background (macOS-style corners)
-            draw_rounded_rect(cr, rx, ry, widget_w, widget_h, pill_radius);
+            draw_rounded_rect(cr, rx, ry, widget_w, widget_h, 10);
             cr.set_source_rgba(pill_r, pill_g, pill_b, 0.12);
             cr.fill();
 
@@ -519,23 +523,7 @@ namespace Dokku {
             cr.save();
             draw_rounded_rect(cr, art_x, art_y, art_sz, art_sz, 6);
             cr.clip();
-            var art = mp.get_art(art_sz);
-            if (art != null) {
-                Gdk.cairo_set_source_pixbuf(cr, art, art_x, art_y);
-                cr.paint();
-            } else {
-                cr.set_source_rgba(bg_r, bg_g, bg_b, 0.6);
-                cr.paint();
-                // Fallback music icon centered in square
-                int fallback_sz = art_sz / 2;
-                var fb = get_icon("audio-x-generic-symbolic", fallback_sz);
-                if (fb != null) {
-                    Gdk.cairo_set_source_pixbuf(cr, fb,
-                        art_x + (art_sz - fallback_sz) / 2.0,
-                        art_y + (art_sz - fallback_sz) / 2.0);
-                    cr.paint();
-                }
-            }
+            paint_album_art(cr, mp, art_x, art_y, art_sz);
             cr.restore();
 
             // Control button positions
@@ -547,47 +535,9 @@ namespace Dokku {
             bool pause_hovered = item_hovered && hover_x >= pause_x && hover_x <= pause_x + ctrl_sz;
             bool skip_hovered = item_hovered && hover_x >= skip_x && hover_x <= skip_x + ctrl_sz;
 
-            bool light = is_light_theme();
-
-            // Draw control icons — ATOP overlay on hover to tint the icon itself
-            // Dark theme: icons are light, so overlay dock bg color to darken them
-            // Light theme: icons are dark, so overlay white to lighten them
-            var pause_icon = get_icon(mp.is_playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic", ctrl_sz);
-            if (pause_icon != null) {
-                cr.push_group();
-                Gdk.cairo_set_source_pixbuf(cr, pause_icon, pause_x, y - ctrl_sz / 2.0);
-                cr.paint();
-                if (pause_hovered) {
-                    cr.set_operator(Cairo.Operator.ATOP);
-                    if (light) {
-                        cr.set_source_rgba(1, 1, 1, 0.2);
-                    } else {
-                        cr.set_source_rgba(bg_r, bg_g, bg_b, 0.5);
-                    }
-                    cr.paint();
-                    cr.set_operator(Cairo.Operator.OVER);
-                }
-                cr.pop_group_to_source();
-                cr.paint();
-            }
-            var skip_icon = get_icon("media-skip-forward-symbolic", ctrl_sz);
-            if (skip_icon != null) {
-                cr.push_group();
-                Gdk.cairo_set_source_pixbuf(cr, skip_icon, skip_x, y - ctrl_sz / 2.0);
-                cr.paint();
-                if (skip_hovered) {
-                    cr.set_operator(Cairo.Operator.ATOP);
-                    if (light) {
-                        cr.set_source_rgba(1, 1, 1, 0.2);
-                    } else {
-                        cr.set_source_rgba(bg_r, bg_g, bg_b, 0.5);
-                    }
-                    cr.paint();
-                    cr.set_operator(Cairo.Operator.OVER);
-                }
-                cr.pop_group_to_source();
-                cr.paint();
-            }
+            draw_media_control(cr, mp.is_playing ? "media-playback-pause-symbolic" : "media-playback-start-symbolic",
+                               ctrl_sz, pause_x, y - ctrl_sz / 2.0, pause_hovered);
+            draw_media_control(cr, "media-skip-forward-symbolic", ctrl_sz, skip_x, y - ctrl_sz / 2.0, skip_hovered);
 
             // Track text between art and controls
             double text_left = art_x + art_sz + 8;
@@ -616,22 +566,8 @@ namespace Dokku {
             }
 
             // Indicator dot (consistent with icon running dots)
-            if (theme != null) {
-                cr.set_source_rgba(theme.indicator_red, theme.indicator_green,
-                                   theme.indicator_blue, theme.indicator_alpha);
-            } else if (light) {
-                cr.set_source_rgba(0.12, 0.12, 0.14, 0.90);  // Charcoal
-            } else {
-                cr.set_source_rgba(1, 1, 1, 0.4);
-            }
-            double dot_x, dot_y;
-            if (position == "top") {
-                dot_x = x; dot_y = y - size / 2.0 - 6;
-            } else {
-                dot_x = x; dot_y = y + size / 2.0 + 6;
-            }
-            cr.arc(dot_x, dot_y, 2.0, 0, 2 * Math.PI);
-            cr.fill();
+            set_indicator_color(cr);
+            draw_indicator_dot(cr, x, y, size, position);
         }
 
         private bool is_light_theme() {

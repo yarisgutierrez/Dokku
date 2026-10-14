@@ -15,6 +15,12 @@ namespace Dokku {
         public bool is_bouncing { get; set; default = false; }
         public bool bounce_is_launch { get; set; default = false; }
         public int64 bounce_start_time { get; set; default = 0; }
+        public const double BOUNCE_SECONDS = 1.5;
+
+        // How long the bounce has been going at monotonic time `now`, in seconds
+        public double bounce_elapsed(int64 now) {
+            return (now - bounce_start_time) / 1000000.0;
+        }
         public double progress_value { get; set; default = 0.0; }
         public bool progress_visible { get; set; default = false; }
         public bool is_folder { get; set; default = false; }
