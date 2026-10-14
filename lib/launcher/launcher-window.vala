@@ -1001,26 +1001,10 @@ namespace Dokku {
         }
 
         private void rename_folder_dialog(string folder_id) {
-            var dialog = new Gtk.Dialog.with_buttons("Rename Folder", this,
-                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_OK", Gtk.ResponseType.OK);
-
-            var entry = new Gtk.Entry();
-            entry.text = config.get_folder_name(folder_id);
-            entry.margin = 20;
-            entry.activates_default = true;
-            dialog.set_default_response(Gtk.ResponseType.OK);
-            dialog.get_content_area().add(entry);
-            dialog.show_all();
-
-            dialog.response.connect((response) => {
-                if (response == Gtk.ResponseType.OK) {
-                    config.rename_folder(folder_id, entry.text);
-                    on_search_changed();
-                }
-                dialog.destroy();
-            });
+            string? name = Dialogs.ask_text(this, "Rename Folder", "_OK", config.get_folder_name(folder_id));
+            if (name == null) return;
+            config.rename_folder(folder_id, name);
+            on_search_changed();
         }
 
         // Close the folder popover; true if one was open

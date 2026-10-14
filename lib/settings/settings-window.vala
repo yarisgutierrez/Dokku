@@ -30,27 +30,10 @@ namespace Dokku {
             apply_css();
             build_ui();
 
-            // Set X11 atoms so picom rules reliably match this window
-            // (_DOKKU_WINDOW@ rule disables blur and shadow)
+            // Tag the window so picom rules for Dokku windows (no blur, no shadow) match it
             this.realize.connect(() => {
                 var gdk_window = get_window();
-                if (gdk_window == null) return;
-                var display = gdk_window.get_display();
-                if (!(display is Gdk.X11.Display)) return;
-                unowned X.Display xdisplay = ((Gdk.X11.Display) display).get_xdisplay();
-                X.Window xid = ((Gdk.X11.Window) gdk_window).get_xid();
-
-                X.Atom dock_atom = xdisplay.intern_atom("_DOKKU_WINDOW", false);
-                uchar[] dock_val = { 1, 0, 0, 0 };
-                xdisplay.change_property(xid, dock_atom, X.XA_CARDINAL, 32,
-                                          X.PropMode.Replace, dock_val, 1);
-
-                X.Atom shadow_atom = xdisplay.intern_atom("_COMPTON_SHADOW", false);
-                uchar[] shadow_off = { 0, 0, 0, 0 };
-                xdisplay.change_property(xid, shadow_atom, X.XA_CARDINAL, 32,
-                                          X.PropMode.Replace, shadow_off, 1);
-
-                xdisplay.flush();
+                if (gdk_window != null) CompositorHints.apply(gdk_window, false);
             });
 
             this.hide.connect(flush_apply);
@@ -118,6 +101,8 @@ namespace Dokku {
 
         // --- UI Helpers ---
 
+        public delegate void BoolSetter(bool value);
+
         private Gtk.Box make_setting_label(string title, string subtitle) {
             var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 2);
             box.halign = Gtk.Align.START;
@@ -147,17 +132,55 @@ namespace Dokku {
             return label;
         }
 
-        private Gtk.Box make_card() {
+        private Gtk.Box make_card(out Gtk.Grid grid) {
             var card = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             card.get_style_context().add_class("settings-card");
+            grid = new Gtk.Grid();
+            grid.row_spacing = 10;
+            grid.column_spacing = 12;
+            card.pack_start(grid, true, true, 0);
             return card;
         }
 
-        private Gtk.Grid make_card_grid(int columns = 2) {
-            var grid = new Gtk.Grid();
-            grid.row_spacing = 10;
-            grid.column_spacing = 12;
+        // A titled card on `outer`; the settings go in the grid it returns
+        private Gtk.Grid add_section(Gtk.Box outer, string title, bool first = false) {
+            Gtk.Grid grid;
+            outer.pack_start(make_section_header(title, first), false, false, 0);
+            outer.pack_start(make_card(out grid), false, false, 0);
             return grid;
+        }
+
+        // A row: the setting's name and description on the left, `control` on the right
+        private void add_row(Gtk.Grid grid, ref int row, string title, string subtitle, Gtk.Widget control) {
+            grid.attach(make_setting_label(title, subtitle), 0, row, 1, 1);
+            grid.attach(control, 1, row++, 1, 1);
+        }
+
+        // A row with an on/off switch. `set` stores the new value; unless `apply` is false
+        // the dock is told to pick it up. A switch that is not `available` is shown off and
+        // greyed out.
+        private void add_switch_row(Gtk.Grid grid, ref int row, string title, string subtitle,
+                                    bool active, owned BoolSetter set, bool available = true,
+                                    bool apply = true) {
+            var toggle = new Gtk.Switch();
+            toggle.active = available && active;
+            toggle.sensitive = available;
+            toggle.halign = Gtk.Align.START;
+            toggle.valign = Gtk.Align.CENTER;
+            toggle.notify["active"].connect(() => {
+                set(toggle.active);
+                if (apply) schedule_apply();
+            });
+            add_row(grid, ref row, title, subtitle, toggle);
+        }
+
+        // Run `commit` when the user leaves the entry or presses Enter, not on every key
+        private void connect_commit(Gtk.Entry entry, owned MenuAction commit) {
+            entry.activate.connect(() => commit());
+            entry.focus_out_event.connect(() => {
+                commit();
+                return false;
+            });
         }
 
         // --- Build UI ---
@@ -204,16 +227,9 @@ namespace Dokku {
             var outer = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             outer.margin = 16;
 
-            // --- Layout section ---
-            outer.pack_start(make_section_header("Layout", true), false, false, 0);
-
-            var layout_card = make_card();
-            var layout_grid = make_card_grid();
-
+            var layout = add_section(outer, "Layout", true);
             int row = 0;
 
-            // Position
-            layout_grid.attach(make_setting_label("Position", "Which edge of the screen to place the dock"), 0, row, 1, 1);
             var position_combo = new Gtk.ComboBoxText();
             position_combo.append("bottom", "Bottom");
             position_combo.append("top", "Top");
@@ -225,10 +241,8 @@ namespace Dokku {
                 config.set_position(position_combo.active_id);
                 schedule_apply();
             });
-            layout_grid.attach(position_combo, 1, row++, 1, 1);
+            add_row(layout, ref row, "Position", "Which edge of the screen to place the dock", position_combo);
 
-            // Icon size
-            layout_grid.attach(make_setting_label("Icon size", "Size of dock icons in pixels"), 0, row, 1, 1);
             var size_scale = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 32, 72, 4);
             size_scale.set_value(config.get_icon_size());
             size_scale.hexpand = true;
@@ -236,10 +250,8 @@ namespace Dokku {
                 config.set_icon_size((int)size_scale.get_value());
                 schedule_apply();
             });
-            layout_grid.attach(size_scale, 1, row++, 1, 1);
+            add_row(layout, ref row, "Icon size", "Size of dock icons in pixels", size_scale);
 
-            // Magnification
-            layout_grid.attach(make_setting_label("Magnification", "Enlarge icons when hovering over them"), 0, row, 1, 1);
             var mag_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
             mag_box.valign = Gtk.Align.CENTER;
             var mag_switch = new Gtk.Switch();
@@ -266,21 +278,11 @@ namespace Dokku {
 
             mag_box.pack_start(mag_switch, false, false, 0);
             mag_box.pack_start(mag_scale, true, true, 0);
-            layout_grid.attach(mag_box, 1, row++, 1, 1);
+            add_row(layout, ref row, "Magnification", "Enlarge icons when hovering over them", mag_box);
 
-            layout_card.pack_start(layout_grid, true, true, 0);
-            outer.pack_start(layout_card, false, false, 0);
-
-            // --- Style section ---
-            outer.pack_start(make_section_header("Style"), false, false, 0);
-
-            var style_card = make_card();
-            var style_grid = make_card_grid();
-
+            var style = add_section(outer, "Style");
             row = 0;
 
-            // Theme
-            style_grid.attach(make_setting_label("Theme", "Visual style for the dock background"), 0, row, 1, 1);
             var theme_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
             theme_box.valign = Gtk.Align.CENTER;
             theme_combo = new Gtk.ComboBoxText();
@@ -296,10 +298,8 @@ namespace Dokku {
             install_btn.tooltip_text = "Install theme from file";
             install_btn.clicked.connect(on_install_theme);
             theme_box.pack_start(install_btn, false, false, 0);
-            style_grid.attach(theme_box, 1, row++, 1, 1);
+            add_row(style, ref row, "Theme", "Visual style for the dock background", theme_box);
 
-            // Dock opacity
-            style_grid.attach(make_setting_label("Dock opacity", "Background transparency level"), 0, row, 1, 1);
             var opacity_scale = new Gtk.Scale.with_range(Gtk.Orientation.HORIZONTAL, 0.0, 1.0, 0.05);
             opacity_scale.set_value(config.get_dock_opacity());
             opacity_scale.hexpand = true;
@@ -312,37 +312,14 @@ namespace Dokku {
                 config.set_dock_opacity(opacity_scale.get_value());
                 schedule_apply();
             });
-            style_grid.attach(opacity_scale, 1, row++, 1, 1);
+            add_row(style, ref row, "Dock opacity", "Background transparency level", opacity_scale);
 
-            // Frosted glass (compositor blur)
-            style_grid.attach(make_setting_label("Frosted glass", subtitle_for(Feature.COMPOSITOR_BLUR,
-                "Requires a compositor with blur support (e.g. Picom)")), 0, row, 1, 1);
-            var blur_switch = new Gtk.Switch();
-            bool blur_ok = Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
-            blur_switch.active = blur_ok && config.get_blur_enabled();
-            blur_switch.sensitive = blur_ok;
-            blur_switch.halign = Gtk.Align.START;
-            blur_switch.valign = Gtk.Align.CENTER;
-            blur_switch.notify["active"].connect(() => {
-                config.set_blur_enabled(blur_switch.active);
-                schedule_apply();
-            });
-            style_grid.attach(blur_switch, 1, row++, 1, 1);
-
-            // Rounded corners
-            style_grid.attach(make_setting_label("Rounded corners", "Round the edges of the dock background"), 0, row, 1, 1);
-            var corners_switch = new Gtk.Switch();
-            corners_switch.active = config.get_rounded_corners();
-            corners_switch.halign = Gtk.Align.START;
-            corners_switch.valign = Gtk.Align.CENTER;
-            corners_switch.notify["active"].connect(() => {
-                config.set_rounded_corners(corners_switch.active);
-                schedule_apply();
-            });
-            style_grid.attach(corners_switch, 1, row++, 1, 1);
-
-            style_card.pack_start(style_grid, true, true, 0);
-            outer.pack_start(style_card, false, false, 0);
+            add_switch_row(style, ref row, "Frosted glass",
+                subtitle_for(Feature.COMPOSITOR_BLUR, "Requires a compositor with blur support (e.g. Picom)"),
+                config.get_blur_enabled(), (on) => config.set_blur_enabled(on),
+                Capabilities.current.supports(Feature.COMPOSITOR_BLUR));
+            add_switch_row(style, ref row, "Rounded corners", "Round the edges of the dock background",
+                config.get_rounded_corners(), (on) => config.set_rounded_corners(on));
 
             return outer;
         }
@@ -356,24 +333,11 @@ namespace Dokku {
         }
 
         private void on_install_theme() {
-            var dialog = new Gtk.FileChooserDialog(
-                "Install Theme", this, Gtk.FileChooserAction.OPEN,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Open", Gtk.ResponseType.ACCEPT
-            );
-
-            var filter = new Gtk.FileFilter();
-            filter.set_filter_name("Theme files (*.zip)");
-            filter.add_pattern("*.zip");
-            dialog.add_filter(filter);
-
-            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
-                var path = dialog.get_filename();
-                if (theme_manager.install_theme(path)) {
-                    refresh_theme_list();
-                }
+            string? path = Dialogs.choose_file(this, "Install Theme", Gtk.FileChooserAction.OPEN,
+                                               "*.zip", "Theme files (*.zip)");
+            if (path != null && theme_manager.install_theme(path)) {
+                refresh_theme_list();
             }
-            dialog.destroy();
         }
 
         // --- Behavior Tab ---
@@ -385,44 +349,18 @@ namespace Dokku {
             var outer = new Gtk.Box(Gtk.Orientation.VERTICAL, 0);
             outer.margin = 16;
 
-            // --- Visibility section ---
-            outer.pack_start(make_section_header("Visibility", true), false, false, 0);
-
-            var vis_card = make_card();
-            var vis_grid = make_card_grid();
+            var visibility = add_section(outer, "Visibility", true);
             int row = 0;
+            add_switch_row(visibility, ref row, "Auto-hide", "Hide the dock when not in use",
+                config.get_auto_hide(), (on) => config.set_auto_hide(on));
+            add_switch_row(visibility, ref row, "Dodge windows",
+                subtitle_for(Feature.DODGE_WINDOWS,
+                    Capabilities.current.session == SessionType.WAYLAND
+                        ? "Hide when a window is maximized or fullscreen on this screen"
+                        : "Hide when a window overlaps the dock"),
+                config.get_dodge_windows(), (on) => config.set_dodge_windows(on),
+                Capabilities.current.supports(Feature.DODGE_WINDOWS));
 
-            // Auto-hide
-            vis_grid.attach(make_setting_label("Auto-hide", "Hide the dock when not in use"), 0, row, 1, 1);
-            var hide_switch = new Gtk.Switch();
-            hide_switch.active = config.get_auto_hide();
-            hide_switch.halign = Gtk.Align.START;
-            hide_switch.valign = Gtk.Align.CENTER;
-            hide_switch.notify["active"].connect(() => {
-                config.set_auto_hide(hide_switch.active);
-                schedule_apply();
-            });
-            vis_grid.attach(hide_switch, 1, row++, 1, 1);
-
-            // Dodge windows
-            vis_grid.attach(make_setting_label("Dodge windows", subtitle_for(Feature.DODGE_WINDOWS,
-                Capabilities.current.session == SessionType.WAYLAND
-                    ? "Hide when a window is maximized or fullscreen on this screen"
-                    : "Hide when a window overlaps the dock")), 0, row, 1, 1);
-            var dodge_switch = new Gtk.Switch();
-            bool dodge_ok = Capabilities.current.supports(Feature.DODGE_WINDOWS);
-            dodge_switch.active = dodge_ok && config.get_dodge_windows();
-            dodge_switch.sensitive = dodge_ok;
-            dodge_switch.halign = Gtk.Align.START;
-            dodge_switch.valign = Gtk.Align.CENTER;
-            dodge_switch.notify["active"].connect(() => {
-                config.set_dodge_windows(dodge_switch.active);
-                schedule_apply();
-            });
-            vis_grid.attach(dodge_switch, 1, row++, 1, 1);
-
-            // Hide delay
-            vis_grid.attach(make_setting_label("Hide delay", "Milliseconds before the dock hides"), 0, row, 1, 1);
             var delay_spin = new Gtk.SpinButton.with_range(0, 2000, 100);
             delay_spin.value = config.get_hide_delay();
             delay_spin.valign = Gtk.Align.CENTER;
@@ -430,106 +368,41 @@ namespace Dokku {
                 config.set_hide_delay((int)delay_spin.value);
                 schedule_apply();
             });
-            vis_grid.attach(delay_spin, 1, row++, 1, 1);
+            add_row(visibility, ref row, "Hide delay", "Milliseconds before the dock hides", delay_spin);
 
-            // Show on all monitors
-            vis_grid.attach(make_setting_label("Show on all monitors", "Display the dock on every connected display"), 0, row, 1, 1);
-            var multi_switch = new Gtk.Switch();
-            multi_switch.active = config.get_multi_monitor();
-            multi_switch.halign = Gtk.Align.START;
-            multi_switch.valign = Gtk.Align.CENTER;
-            multi_switch.notify["active"].connect(() => {
-                config.set_multi_monitor(multi_switch.active);
-                schedule_apply();
-            });
-            vis_grid.attach(multi_switch, 1, row++, 1, 1);
+            add_switch_row(visibility, ref row, "Show on all monitors", "Display the dock on every connected display",
+                config.get_multi_monitor(), (on) => config.set_multi_monitor(on));
 
-            vis_card.pack_start(vis_grid, true, true, 0);
-            outer.pack_start(vis_card, false, false, 0);
-
-            // --- Monitors section: only when there is more than one to tell apart ---
+            // Monitors section: only when there is more than one to tell apart
             var display = Gdk.Display.get_default();
             if (display != null && display.get_n_monitors() > 1) {
                 outer.pack_start(make_section_header("Monitors"), false, false, 0);
                 outer.pack_start(create_monitors_card(display), false, false, 0);
             }
 
-            // --- Animations section ---
-            outer.pack_start(make_section_header("Animations"), false, false, 0);
-
-            var anim_card = make_card();
-            var anim_grid = make_card_grid();
+            var animations = add_section(outer, "Animations");
             row = 0;
+            add_switch_row(animations, ref row, "Bounce on launch", "Bounce icon when opening an application",
+                config.get_launch_bounce(), (on) => config.set_launch_bounce(on));
+            add_switch_row(animations, ref row, "Launcher fade", "Fade animation when opening the app launcher",
+                config.get_launcher_fade(), (on) => config.set_launcher_fade(on), true, false);
 
-            // Bounce on launch
-            anim_grid.attach(make_setting_label("Bounce on launch", "Bounce icon when opening an application"), 0, row, 1, 1);
-            var bounce_switch = new Gtk.Switch();
-            bounce_switch.active = config.get_launch_bounce();
-            bounce_switch.halign = Gtk.Align.START;
-            bounce_switch.valign = Gtk.Align.CENTER;
-            bounce_switch.notify["active"].connect(() => {
-                config.set_launch_bounce(bounce_switch.active);
-                schedule_apply();
-            });
-            anim_grid.attach(bounce_switch, 1, row++, 1, 1);
-
-            // Launcher fade
-            anim_grid.attach(make_setting_label("Launcher fade", "Fade animation when opening the app launcher"), 0, row, 1, 1);
-            var fade_switch = new Gtk.Switch();
-            fade_switch.active = config.get_launcher_fade();
-            fade_switch.halign = Gtk.Align.START;
-            fade_switch.valign = Gtk.Align.CENTER;
-            fade_switch.notify["active"].connect(() => {
-                config.set_launcher_fade(fade_switch.active);
-            });
-            anim_grid.attach(fade_switch, 1, row++, 1, 1);
-
-            anim_card.pack_start(anim_grid, true, true, 0);
-            outer.pack_start(anim_card, false, false, 0);
-
-            // --- Dock Items section ---
-            outer.pack_start(make_section_header("Dock Items"), false, false, 0);
-
-            var items_card = make_card();
-            var items_grid = make_card_grid();
+            var items = add_section(outer, "Dock Items");
             row = 0;
-
-            // Click the active app to minimize it
-            items_grid.attach(make_setting_label("Minimize on click", "Clicking the icon of the focused app minimizes it"), 0, row, 1, 1);
-            var minimize_switch = new Gtk.Switch();
-            minimize_switch.active = config.get_minimize_on_click();
-            minimize_switch.halign = Gtk.Align.START;
-            minimize_switch.valign = Gtk.Align.CENTER;
-            minimize_switch.notify["active"].connect(() => {
-                config.set_minimize_on_click(minimize_switch.active);
-                schedule_apply();
-            });
-            items_grid.attach(minimize_switch, 1, row++, 1, 1);
-
-            // Media widget
-            items_grid.attach(make_setting_label("Media widget", "Show media player controls on the dock"), 0, row, 1, 1);
-            var media_switch = new Gtk.Switch();
-            media_switch.active = config.get_media_widget();
-            media_switch.halign = Gtk.Align.START;
-            media_switch.valign = Gtk.Align.CENTER;
-            media_switch.notify["active"].connect(() => {
-                config.set_media_widget(media_switch.active);
-                schedule_apply();
-            });
-            items_grid.attach(media_switch, 1, row++, 1, 1);
+            add_switch_row(items, ref row, "Minimize on click", "Clicking the icon of the focused app minimizes it",
+                config.get_minimize_on_click(), (on) => config.set_minimize_on_click(on));
+            add_switch_row(items, ref row, "Media widget", "Show media player controls on the dock",
+                config.get_media_widget(), (on) => config.set_media_widget(on));
 
             // Players the media widget ignores
-            items_grid.attach(make_setting_label("Ignored players",
-                "Media players to skip, separated by commas. Matches part of the player's name"), 0, row, 1, 1);
             var blocked_entry = new Gtk.Entry();
             blocked_entry.text = string.joinv(", ", config.get_media_blocked_players());
             blocked_entry.width_chars = 28;
             blocked_entry.halign = Gtk.Align.START;
             blocked_entry.valign = Gtk.Align.CENTER;
             string saved_blocked = blocked_entry.text;
-            // Saved when the entry is left or Enter is pressed, not on every key
-            SourceFunc commit_blocked = () => {
-                if (blocked_entry.text == saved_blocked) return Source.REMOVE;
+            connect_commit(blocked_entry, () => {
+                if (blocked_entry.text == saved_blocked) return;
                 saved_blocked = blocked_entry.text;
                 string[] players = {};
                 foreach (var part in blocked_entry.text.split(",")) {
@@ -538,78 +411,27 @@ namespace Dokku {
                 }
                 config.set_media_blocked_players(players);
                 schedule_apply();
-                return Source.REMOVE;
-            };
-            blocked_entry.activate.connect(() => { commit_blocked(); });
-            blocked_entry.focus_out_event.connect(() => { commit_blocked(); return false; });
-            items_grid.attach(blocked_entry, 1, row++, 1, 1);
-
-            // Notification badges
-            items_grid.attach(make_setting_label("Notification badges", "Show unread count on app icons"), 0, row, 1, 1);
-            var badge_switch = new Gtk.Switch();
-            badge_switch.active = config.get_notification_badges();
-            badge_switch.halign = Gtk.Align.START;
-            badge_switch.valign = Gtk.Align.CENTER;
-            badge_switch.notify["active"].connect(() => {
-                config.set_notification_badges(badge_switch.active);
-                schedule_apply();
             });
-            items_grid.attach(badge_switch, 1, row++, 1, 1);
+            add_row(items, ref row, "Ignored players",
+                "Media players to skip, separated by commas. Matches part of the player's name", blocked_entry);
 
-            // Separator
-            items_grid.attach(make_setting_label("Separator", "Divider between pinned and running apps"), 0, row, 1, 1);
-            var sep_switch = new Gtk.Switch();
-            sep_switch.active = config.get_plugin_enabled("separator");
-            sep_switch.halign = Gtk.Align.START;
-            sep_switch.valign = Gtk.Align.CENTER;
-            sep_switch.notify["active"].connect(() => {
-                config.set_plugin_enabled("separator", sep_switch.active);
-                schedule_apply();
-            });
-            items_grid.attach(sep_switch, 1, row++, 1, 1);
+            add_switch_row(items, ref row, "Notification badges", "Show unread count on app icons",
+                config.get_notification_badges(), (on) => config.set_notification_badges(on));
+            add_switch_row(items, ref row, "Separator", "Divider between pinned and running apps",
+                config.get_plugin_enabled("separator"), (on) => config.set_plugin_enabled("separator", on));
+            add_switch_row(items, ref row, "Show Desktop", subtitle_for(Feature.WINDOW_TRACKING, "Button to minimize all windows"),
+                config.get_plugin_enabled("show-desktop"), (on) => config.set_plugin_enabled("show-desktop", on),
+                Capabilities.current.supports(Feature.WINDOW_TRACKING));
+            add_switch_row(items, ref row, "Trash", "Quick access to the trash can",
+                config.get_plugin_enabled("trash"), (on) => config.set_plugin_enabled("trash", on));
 
-            // Show Desktop
-            items_grid.attach(make_setting_label("Show Desktop", subtitle_for(Feature.WINDOW_TRACKING,
-                "Button to minimize all windows")), 0, row, 1, 1);
-            var desktop_switch = new Gtk.Switch();
-            bool desktop_ok = Capabilities.current.supports(Feature.WINDOW_TRACKING);
-            desktop_switch.active = desktop_ok && config.get_plugin_enabled("show-desktop");
-            desktop_switch.sensitive = desktop_ok;
-            desktop_switch.halign = Gtk.Align.START;
-            desktop_switch.valign = Gtk.Align.CENTER;
-            desktop_switch.notify["active"].connect(() => {
-                config.set_plugin_enabled("show-desktop", desktop_switch.active);
-                schedule_apply();
-            });
-            items_grid.attach(desktop_switch, 1, row++, 1, 1);
-
-            // Trash
-            items_grid.attach(make_setting_label("Trash", "Quick access to the trash can"), 0, row, 1, 1);
-            var trash_switch = new Gtk.Switch();
-            trash_switch.active = config.get_plugin_enabled("trash");
-            trash_switch.halign = Gtk.Align.START;
-            trash_switch.valign = Gtk.Align.CENTER;
-            trash_switch.notify["active"].connect(() => {
-                config.set_plugin_enabled("trash", trash_switch.active);
-                schedule_apply();
-            });
-            items_grid.attach(trash_switch, 1, row++, 1, 1);
-
-            // User plugins
             foreach (var plugin in plugin_manager.get_user_plugins()) {
                 var script_plugin = plugin as ScriptPlugin;
                 bool on_by_default = script_plugin == null || script_plugin.enabled_by_default;
-                items_grid.attach(make_setting_label(plugin.name, "Plugin"), 0, row, 1, 1);
-                var sw = new Gtk.Switch();
-                sw.active = config.get_plugin_enabled(plugin.id, on_by_default);
-                sw.halign = Gtk.Align.START;
-                sw.valign = Gtk.Align.CENTER;
-                var pid = plugin.id;
-                sw.notify["active"].connect(() => {
-                    config.set_plugin_enabled(pid, sw.active);
-                    schedule_apply();
-                });
-                items_grid.attach(sw, 1, row++, 1, 1);
+                string plugin_id = plugin.id;
+                add_switch_row(items, ref row, plugin.name, "Plugin",
+                    config.get_plugin_enabled(plugin_id, on_by_default),
+                    (on) => config.set_plugin_enabled(plugin_id, on));
             }
 
             // Action buttons
@@ -624,74 +446,44 @@ namespace Dokku {
             create_folder_btn.clicked.connect(() => on_create_folder());
             btn_box.pack_start(create_folder_btn, false, false, 0);
 
-            items_grid.attach(btn_box, 0, row++, 2, 1);
+            items.attach(btn_box, 0, row++, 2, 1);
 
-            items_card.pack_start(items_grid, true, true, 0);
-            outer.pack_start(items_card, false, false, 0);
-
-            // --- Launcher section ---
-            outer.pack_start(make_section_header("Launcher"), false, false, 0);
-
-            var launcher_card = make_card();
-            var launcher_grid = make_card_grid();
+            var launcher = add_section(outer, "Launcher");
             row = 0;
 
-            // Hidden apps
-            launcher_grid.attach(make_setting_label("Hidden apps", "Apps hidden from the application launcher"), 0, row, 1, 1);
             var hidden_btn = new Gtk.Button.with_label("Manage...");
             hidden_btn.halign = Gtk.Align.START;
             hidden_btn.valign = Gtk.Align.CENTER;
             hidden_btn.clicked.connect(show_hidden_apps_dialog);
-            launcher_grid.attach(hidden_btn, 1, row++, 1, 1);
+            add_row(launcher, ref row, "Hidden apps", "Apps hidden from the application launcher", hidden_btn);
 
-            // Group Settings apps
-            launcher_grid.attach(make_setting_label("Group apps by category", "In All, collect categories with many apps into one folder each. Your ten most-used apps stay out of folders"), 0, row, 1, 1);
-            var group_switch = new Gtk.Switch();
-            group_switch.active = config.get_group_apps();
-            group_switch.halign = Gtk.Align.START;
-            group_switch.valign = Gtk.Align.CENTER;
-            group_switch.notify["active"].connect(() => {
-                config.set_group_apps(group_switch.active);
-                schedule_apply();
-            });
-            launcher_grid.attach(group_switch, 1, row++, 1, 1);
+            add_switch_row(launcher, ref row, "Group apps by category",
+                "In All, collect categories with many apps into one folder each. Your ten most-used apps stay out of folders",
+                config.get_group_apps(), (on) => config.set_group_apps(on));
 
-            // Web search address
-            launcher_grid.attach(make_setting_label("Web search",
-                "Where the launcher's search the web row goes. %s stands for the search words. Empty turns the row off"), 0, row, 1, 1);
             var web_entry = new Gtk.Entry();
             web_entry.text = config.get_web_search_url();
             web_entry.width_chars = 30;
             web_entry.halign = Gtk.Align.START;
             web_entry.valign = Gtk.Align.CENTER;
             string saved_web = web_entry.text;
-            SourceFunc commit_web = () => {
+            connect_commit(web_entry, () => {
                 string url = web_entry.text.strip();
-                if (url == saved_web) return Source.REMOVE;
+                if (url == saved_web) return;
                 // Only an empty value or an http(s) address with %s is kept
                 if (url != "" && QuickResults.web_search_uri(url, "x") == null) {
                     web_entry.text = saved_web;
-                    return Source.REMOVE;
+                    return;
                 }
                 saved_web = url;
                 config.set_web_search_url(url);
                 schedule_apply();
-                return Source.REMOVE;
-            };
-            web_entry.activate.connect(() => { commit_web(); });
-            web_entry.focus_out_event.connect(() => { commit_web(); return false; });
-            launcher_grid.attach(web_entry, 1, row++, 1, 1);
+            });
+            add_row(launcher, ref row, "Web search",
+                "Where the launcher's search the web row goes. %s stands for the search words. Empty turns the row off",
+                web_entry);
 
-            launcher_card.pack_start(launcher_grid, true, true, 0);
-            outer.pack_start(launcher_card, false, false, 0);
-
-            // --- Backup section ---
-            outer.pack_start(make_section_header("Backup", false), false, false, 0);
-
-            var backup_card = make_card();
-            var backup_grid = make_card_grid();
-            backup_grid.attach(make_setting_label("Settings file",
-                "Save your settings, pinned apps and folders to a file, or load them back"), 0, 0, 1, 1);
+            var backup = add_section(outer, "Backup");
             var backup_buttons = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 6);
             backup_buttons.halign = Gtk.Align.END;
             backup_buttons.valign = Gtk.Align.CENTER;
@@ -705,9 +497,9 @@ namespace Dokku {
             backup_buttons.pack_start(export_btn, false, false, 0);
             backup_buttons.pack_start(import_btn, false, false, 0);
             backup_buttons.pack_start(reset_btn, false, false, 0);
-            backup_grid.attach(backup_buttons, 1, 0, 1, 1);
-            backup_card.pack_start(backup_grid, true, true, 0);
-            outer.pack_start(backup_card, false, false, 0);
+            row = 0;
+            add_row(backup, ref row, "Settings file",
+                "Save your settings, pinned apps and folders to a file, or load them back", backup_buttons);
 
             scroll.add(outer);
             return scroll;
@@ -716,8 +508,8 @@ namespace Dokku {
         // One row per connected monitor: its own edge, icon size and auto-hide, or "Default"
         // to follow the settings above
         private Gtk.Widget create_monitors_card(Gdk.Display display) {
-            var card = make_card();
-            var grid = make_card_grid();
+            Gtk.Grid grid;
+            var card = make_card(out grid);
             string[] keys = MonitorKey.all(display);
             int row = 0;
 
@@ -792,7 +584,6 @@ namespace Dokku {
                 grid.attach(box, 1, row++, 1, 1);
             }
 
-            card.pack_start(grid, true, true, 0);
             return card;
         }
 
@@ -825,43 +616,21 @@ namespace Dokku {
         }
 
         private void on_export_settings() {
-            var dialog = new Gtk.FileChooserDialog(
-                "Export Settings", this, Gtk.FileChooserAction.SAVE,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Save", Gtk.ResponseType.ACCEPT
-            );
-            dialog.do_overwrite_confirmation = true;
-            dialog.set_current_name("dokku-settings.ini");
-            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
-                string path = dialog.get_filename();
-                dialog.destroy();
-                try {
-                    config.export_to(path);
-                    tell(Gtk.MessageType.INFO, "Settings exported", path);
-                } catch (Error e) {
-                    tell(Gtk.MessageType.ERROR, "Could not save the settings", e.message);
-                }
-                return;
+            string? path = Dialogs.choose_file(this, "Export Settings", Gtk.FileChooserAction.SAVE,
+                                               null, null, null, "dokku-settings.ini");
+            if (path == null) return;
+            try {
+                config.export_to(path);
+                tell(Gtk.MessageType.INFO, "Settings exported", path);
+            } catch (Error e) {
+                tell(Gtk.MessageType.ERROR, "Could not save the settings", e.message);
             }
-            dialog.destroy();
         }
 
         private void on_import_settings() {
-            var dialog = new Gtk.FileChooserDialog(
-                "Import Settings", this, Gtk.FileChooserAction.OPEN,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Open", Gtk.ResponseType.ACCEPT
-            );
-            var filter = new Gtk.FileFilter();
-            filter.set_filter_name("Settings files (*.ini)");
-            filter.add_pattern("*.ini");
-            dialog.add_filter(filter);
-            if (dialog.run() != Gtk.ResponseType.ACCEPT) {
-                dialog.destroy();
-                return;
-            }
-            string path = dialog.get_filename();
-            dialog.destroy();
+            string? path = Dialogs.choose_file(this, "Import Settings", Gtk.FileChooserAction.OPEN,
+                                               "*.ini", "Settings files (*.ini)");
+            if (path == null) return;
 
             if (!confirm("Replace your settings with this file?",
                          "A copy of your current settings is kept as config.ini.bak. " +
@@ -894,23 +663,11 @@ namespace Dokku {
         }
 
         private void on_install_plugin() {
-            var dialog = new Gtk.FileChooserDialog(
-                "Install Plugin", this, Gtk.FileChooserAction.OPEN,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Open", Gtk.ResponseType.ACCEPT
-            );
-
-            var filter = new Gtk.FileFilter();
-            filter.set_filter_name("Plugin files (*.zip)");
-            filter.add_pattern("*.zip");
-            dialog.add_filter(filter);
-
-            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
-                if (plugin_manager.install_plugin(dialog.get_filename())) {
-                    schedule_apply();
-                }
+            string? path = Dialogs.choose_file(this, "Install Plugin", Gtk.FileChooserAction.OPEN,
+                                               "*.zip", "Plugin files (*.zip)");
+            if (path != null && plugin_manager.install_plugin(path)) {
+                schedule_apply();
             }
-            dialog.destroy();
         }
 
         // --- Hidden Apps Dialog ---
@@ -1006,8 +763,8 @@ namespace Dokku {
             // --- Launcher Hotkey section ---
             outer.pack_start(make_section_header("Launcher Hotkey", hotkeys_unavailable == null), false, false, 0);
 
-            var launcher_card = make_card();
-            var launcher_grid = make_card_grid();
+            Gtk.Grid launcher_grid;
+            var launcher_card = make_card(out launcher_grid);
             int row = 0;
 
             launcher_grid.attach(make_setting_label("Toggle launcher", "Global shortcut to open the app launcher"), 0, row, 1, 1);
@@ -1034,14 +791,13 @@ namespace Dokku {
             });
             launcher_grid.attach(launcher_clear_btn, 3, row++, 1, 1);
 
-            launcher_card.pack_start(launcher_grid, true, true, 0);
             outer.pack_start(launcher_card, false, false, 0);
 
             // --- Application Hotkeys section ---
             outer.pack_start(make_section_header("Application Hotkeys"), false, false, 0);
 
-            var app_card = make_card();
-            var app_grid = make_card_grid();
+            Gtk.Grid app_grid;
+            var app_card = make_card(out app_grid);
             row = 0;
 
             // Create 4 app hotkey slots
@@ -1109,7 +865,6 @@ namespace Dokku {
                 app_grid.attach(clear_btn, 3, row++, 1, 1);
             }
 
-            app_card.pack_start(app_grid, true, true, 0);
             outer.pack_start(app_card, false, false, 0);
 
             if (hotkeys_unavailable != null) {
@@ -1259,21 +1014,13 @@ namespace Dokku {
         }
 
         private void on_browse_app(int slot) {
-            var dialog = new Gtk.FileChooserDialog(
-                "Choose Application", this, Gtk.FileChooserAction.OPEN,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Open", Gtk.ResponseType.ACCEPT
-            );
-            dialog.set_current_folder("/usr/bin");
-
-            if (dialog.run() == Gtk.ResponseType.ACCEPT) {
-                string path = dialog.get_filename();
-                app_entries[slot - 1].text = path;
-                config.set_app_hotkey_id(slot, path);
-                app_hotkey_buttons[slot - 1].sensitive = true;
-                schedule_apply();
-            }
-            dialog.destroy();
+            string? path = Dialogs.choose_file(this, "Choose Application", Gtk.FileChooserAction.OPEN,
+                                               null, null, "/usr/bin");
+            if (path == null) return;
+            app_entries[slot - 1].text = path;
+            config.set_app_hotkey_id(slot, path);
+            app_hotkey_buttons[slot - 1].sensitive = true;
+            schedule_apply();
         }
 
         private void on_clear_app_slot(int slot) {
@@ -1317,34 +1064,15 @@ namespace Dokku {
         }
 
         private void on_create_folder() {
-            var dialog = new Gtk.Dialog.with_buttons("New Folder", this,
-                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Create", Gtk.ResponseType.OK);
-            dialog.set_default_response(Gtk.ResponseType.OK);
-
-            var entry = new Gtk.Entry();
-            entry.placeholder_text = "Folder name";
-            entry.margin = 12;
-            entry.activates_default = true;
-            dialog.get_content_area().add(entry);
-            dialog.show_all();
-
-            if (dialog.run() == Gtk.ResponseType.OK) {
-                string name = entry.text.strip();
-                if (name != "") {
-                    string folder_id = "f_%s".printf(new DateTime.now_utc().to_unix().to_string());
-                    config.create_folder(folder_id, name, {});
-                    // Add folder reference to pinned apps list
-                    var pinned = config.get_pinned_apps();
-                    string[] new_pinned = {};
-                    foreach (var p in pinned) new_pinned += p;
-                    new_pinned += "folder:" + folder_id;
-                    config.set_pinned_apps(new_pinned);
-                    schedule_apply();
-                }
-            }
-            dialog.destroy();
+            string? name = Dialogs.ask_text(this, "New Folder", "_Create", "", "Folder name");
+            if (name == null) return;
+            string folder_id = "f_%s".printf(new DateTime.now_utc().to_unix().to_string());
+            config.create_folder(folder_id, name, {});
+            // Add folder reference to pinned apps list
+            string[] new_pinned = config.get_pinned_apps();
+            new_pinned += "folder:" + folder_id;
+            config.set_pinned_apps(new_pinned);
+            schedule_apply();
         }
     }
 }

@@ -2426,28 +2426,11 @@ namespace Dokku {
         }
 
         private void show_rename_folder_dialog(DockItem folder_item) {
-            var dialog = new Gtk.Dialog.with_buttons("Rename Folder", this,
-                Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
-                "_Cancel", Gtk.ResponseType.CANCEL,
-                "_Rename", Gtk.ResponseType.OK);
-            dialog.set_default_response(Gtk.ResponseType.OK);
-
-            var entry = new Gtk.Entry();
-            entry.text = folder_item.name;
-            entry.margin = 12;
-            entry.activates_default = true;
-            dialog.get_content_area().add(entry);
-            dialog.show_all();
-
-            if (dialog.run() == Gtk.ResponseType.OK) {
-                string new_name = entry.text.strip();
-                if (new_name != "") {
-                    config.rename_folder(folder_item.folder_id, new_name);
-                    folder_item.name = new_name;
-                    schedule_redraw();
-                }
-            }
-            dialog.destroy();
+            string? new_name = Dialogs.ask_text(this, "Rename Folder", "_Rename", folder_item.name);
+            if (new_name == null) return;
+            config.rename_folder(folder_item.folder_id, new_name);
+            folder_item.name = new_name;
+            schedule_redraw();
         }
     }
 }
