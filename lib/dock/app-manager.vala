@@ -135,6 +135,7 @@ namespace Dokku {
             // than that, and only fall back to Accessories when nothing else applies.
             var map = get_category_map();
             bool generic_only = false;
+            string? chosen = null;
             foreach (var cat in categories) {
                 string trimmed = cat.strip();
                 if (trimmed == "") continue;
@@ -144,10 +145,10 @@ namespace Dokku {
                     generic_only = true;
                     continue;
                 }
-                display_category = mapped;
-                return;
+                chosen = mapped;
+                break;
             }
-            display_category = generic_only ? "Accessories" : "Other";
+            display_category = chosen ?? (generic_only ? "Accessories" : "Other");
             groupable = display_category != "Other";
         }
 
