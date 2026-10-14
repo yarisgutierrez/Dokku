@@ -34,18 +34,22 @@ namespace Dokku {
             foreach (var dir in dirs) load_plugins_from(dir);
         }
 
+        // Register the plugin described by <dir>/plugin.ini, if there is a valid one
+        private bool load_plugin_dir(string dir) {
+            var plugin_file = Path.build_filename(dir, "plugin.ini");
+            if (!FileUtils.test(plugin_file, FileTest.EXISTS)) return false;
+            var plugin = new ScriptPlugin.from_file(plugin_file);
+            if (plugin.id == null) return false;
+            register_plugin(plugin);
+            return true;
+        }
+
         private void load_plugins_from(string plugins_dir) {
             try {
                 var dir = Dir.open(plugins_dir);
                 string? name;
                 while ((name = dir.read_name()) != null) {
-                    var plugin_file = Path.build_filename(plugins_dir, name, "plugin.ini");
-                    if (FileUtils.test(plugin_file, FileTest.EXISTS)) {
-                        var plugin = new ScriptPlugin.from_file(plugin_file);
-                        if (plugin.id != null) {
-                            register_plugin(plugin);
-                        }
-                    }
+                    load_plugin_dir(Path.build_filename(plugins_dir, name));
                 }
             } catch (Error e) {
                 // A directory that does not exist is normal
@@ -79,14 +83,7 @@ namespace Dokku {
                 return false;
             }
 
-            var plugin_file = Path.build_filename(dest, "plugin.ini");
-            if (FileUtils.test(plugin_file, FileTest.EXISTS)) {
-                var plugin = new ScriptPlugin.from_file(plugin_file);
-                if (plugin.id != null) {
-                    register_plugin(plugin);
-                    return true;
-                }
-            }
+            if (load_plugin_dir(dest)) return true;
             warning("Plugin zip had no valid plugin.ini: %s", zip_path);
             return false;
         }

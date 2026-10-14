@@ -1,4 +1,6 @@
 namespace Dokku {
+    public delegate void ExitFunc(bool ok);
+
     public class FileUtil {
         // Run a command line (no shell involved) and leave it to run on its own
         public static bool run_detached(string command_line) {
@@ -11,6 +13,19 @@ namespace Dokku {
                 warning("Failed to run %s: %s", command_line, e.message);
                 return false;
             }
+        }
+
+        // Run a command and call `done` on the main loop once it exits (ok: exit status 0)
+        public static void run_watched(string[] argv, owned ExitFunc done) throws Error {
+            Pid pid;
+            Process.spawn_async(null, argv, null,
+                SpawnFlags.SEARCH_PATH | SpawnFlags.DO_NOT_REAP_CHILD, null, out pid);
+            ChildWatch.add(pid, (child, status) => {
+                Process.close_pid(child);
+                bool ok = false;
+                try { ok = Process.check_wait_status(status); } catch (Error e) {}
+                done(ok);
+            });
         }
 
         // Extract a zip to dest_dir/<basename>, validate paths, return dest path.

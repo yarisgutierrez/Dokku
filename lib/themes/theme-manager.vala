@@ -48,16 +48,21 @@ namespace Dokku {
             scan_directory(user_themes_dir);
         }
 
+        // Add the theme described by <dir>/theme.ini, if there is one
+        private bool load_theme_dir(string dir) {
+            var theme_file = Path.build_filename(dir, "theme.ini");
+            if (!FileUtils.test(theme_file, FileTest.EXISTS)) return false;
+            var theme = new Theme.from_file(theme_file);
+            themes.set(theme.id, theme);
+            return true;
+        }
+
         private void scan_directory(string dir) {
             try {
                 var directory = Dir.open(dir);
                 string? name;
                 while ((name = directory.read_name()) != null) {
-                    var theme_file = Path.build_filename(dir, name, "theme.ini");
-                    if (FileUtils.test(theme_file, FileTest.EXISTS)) {
-                        var theme = new Theme.from_file(theme_file);
-                        themes.set(theme.id, theme);
-                    }
+                    load_theme_dir(Path.build_filename(dir, name));
                 }
             } catch (Error e) {
                 // Expected if directory doesn't exist yet
@@ -78,12 +83,7 @@ namespace Dokku {
                 return false;
             }
 
-            var theme_file = Path.build_filename(dest, "theme.ini");
-            if (FileUtils.test(theme_file, FileTest.EXISTS)) {
-                var theme = new Theme.from_file(theme_file);
-                themes.set(theme.id, theme);
-                return true;
-            }
+            if (load_theme_dir(dest)) return true;
             warning("Theme zip had no valid theme.ini: %s", zip_path);
             return false;
         }

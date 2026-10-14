@@ -125,18 +125,10 @@ namespace Dokku {
             items = new List<DockItem>();
             bounce_cooldowns = new HashTable<string, int64?>(str_hash, str_equal);
 
-            // Compositor blur hint
-            blur_enabled = config.get_blur_enabled() && Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
+            blur_enabled = blur_wanted();
 
             load_theme();
-            
-            var launcher_item = new DockItem("dokku-launcher", "Applications", "view-app-grid-symbolic");
-            launcher_item.pinned = true;
-            launcher_item.is_launcher = true;
-            items.append(launcher_item);
-
-            load_pinned_apps();
-            load_plugins();
+            rebuild_items();
 
             // Window setup
             set_skip_taskbar_hint(true);
@@ -2110,6 +2102,22 @@ namespace Dokku {
             schedule_redraw();
         }
 
+        // Compositor blur needs both the setting and a session that supports it
+        private bool blur_wanted() {
+            return config.get_blur_enabled() && Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
+        }
+
+        // The launcher button, then the pinned apps, then the plugins
+        private void rebuild_items() {
+            items = new List<DockItem>();
+            var launcher_item = new DockItem("dokku-launcher", "Applications", "view-app-grid-symbolic");
+            launcher_item.pinned = true;
+            launcher_item.is_launcher = true;
+            items.append(launcher_item);
+            load_pinned_apps();
+            load_plugins();
+        }
+
         public void reload_settings() {
             config.reload();
             var media_plugin = plugin_manager.get_plugin("media-player") as MediaPlugin;
@@ -2122,8 +2130,7 @@ namespace Dokku {
             rounded_corners = config.get_rounded_corners();
             dock_opacity = config.get_dock_opacity();
 
-            // Compositor blur hint
-            blur_enabled = config.get_blur_enabled() && Capabilities.current.supports(Feature.COMPOSITOR_BLUR);
+            blur_enabled = blur_wanted();
             update_compositor_hints();
             ensure_blur_bg();
             // Re-apply bounding shape in case rounded_corners changed
@@ -2132,13 +2139,7 @@ namespace Dokku {
             update_dock_dimensions();
             load_theme();
 
-            items = new List<DockItem>();
-            var launcher_item = new DockItem("dokku-launcher", "Applications", "view-app-grid-symbolic");
-            launcher_item.pinned = true;
-            launcher_item.is_launcher = true;
-            items.append(launcher_item);
-            load_pinned_apps();
-            load_plugins();
+            rebuild_items();
 
             // If dodge_windows was disabled, clear dodge state
             if (!dodge_windows && dodge_hiding) {

@@ -418,38 +418,19 @@ namespace Dokku {
             _playing = status.get_string() == "Playing";
         }
 
-        public void activate() {
+        // Fire an MPRIS method on the current player; a failure is logged, not shown
+        private void player_call(string method, Variant? parameters = null) {
             if (player_proxy == null) return;
-            player_proxy.call.begin(
-                "PlayPause", null, DBusCallFlags.NONE, 5000, null,
-                (obj, res) => {
-                    try { player_proxy.call.end(res); }
-                    catch (Error e) { warning("MediaPlugin: PlayPause failed: %s", e.message); }
-                }
-            );
+            player_proxy.call.begin(method, parameters, DBusCallFlags.NONE, 5000, null, (obj, res) => {
+                try { ((DBusProxy) obj).call.end(res); }
+                catch (Error e) { warning("MediaPlugin: %s failed: %s", method, e.message); }
+            });
         }
 
-        public void next() {
-            if (player_proxy == null) return;
-            player_proxy.call.begin(
-                "Next", null, DBusCallFlags.NONE, 5000, null,
-                (obj, res) => {
-                    try { player_proxy.call.end(res); }
-                    catch (Error e) { warning("MediaPlugin: Next failed: %s", e.message); }
-                }
-            );
-        }
+        public void activate() { player_call("PlayPause"); }
+        public void next() { player_call("Next"); }
 
-        public void previous() {
-            if (player_proxy == null) return;
-            player_proxy.call.begin(
-                "Previous", null, DBusCallFlags.NONE, 5000, null,
-                (obj, res) => {
-                    try { player_proxy.call.end(res); }
-                    catch (Error e) { warning("MediaPlugin: Previous failed: %s", e.message); }
-                }
-            );
-        }
+        public void previous() { player_call("Previous"); }
 
         // Where the player is in the track, in microseconds, or -1. MPRIS sends no change
         // signal for Position, so it has to be asked for.
@@ -502,14 +483,8 @@ namespace Dokku {
         }
 
         public void seek_to(int64 position_us) {
-            if (player_proxy == null || track_id == "" || !can_seek) return;
-            player_proxy.call.begin(
-                "SetPosition", new Variant("(ox)", track_id, position_us), DBusCallFlags.NONE, 5000, null,
-                (obj, res) => {
-                    try { player_proxy.call.end(res); }
-                    catch (Error e) { warning("MediaPlugin: SetPosition failed: %s", e.message); }
-                }
-            );
+            if (track_id == "" || !can_seek) return;
+            player_call("SetPosition", new Variant("(ox)", track_id, position_us));
         }
 
         public Gtk.Menu? get_menu() {

@@ -180,12 +180,7 @@ namespace Dokku {
             try {
                 string[] argv;
                 Shell.parse_argv(resolve_command(command), out argv);
-                Pid child_pid;
-                Process.spawn_async(null, argv, null,
-                    SpawnFlags.SEARCH_PATH | SpawnFlags.DO_NOT_REAP_CHILD,
-                    null, out child_pid);
-                ChildWatch.add(child_pid, (pid, status) => {
-                    Process.close_pid(pid);
+                FileUtil.run_watched(argv, (ok) => {
                     if (is_widget) update_widget();
                 });
             } catch (Error e) {

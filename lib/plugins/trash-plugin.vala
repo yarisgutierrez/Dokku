@@ -45,12 +45,7 @@ namespace Dokku {
         }
 
         public void activate() {
-            try {
-                string[] argv = {"xdg-open", "trash://"};
-                Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
-            } catch (Error e) {
-                warning("Failed to open trash: %s", e.message);
-            }
+            FileUtil.run_detached("xdg-open trash://");
         }
 
         public Gtk.Menu? get_menu() {
@@ -145,13 +140,7 @@ namespace Dokku {
             }
             if (count == 0) return 0;
             try {
-                Pid pid;
-                Process.spawn_async(null, argv, null,
-                    SpawnFlags.SEARCH_PATH | SpawnFlags.DO_NOT_REAP_CHILD, null, out pid);
-                ChildWatch.add(pid, (child, status) => {
-                    Process.close_pid(child);
-                    bool ok = false;
-                    try { ok = Process.check_wait_status(status); } catch (Error e) {}
+                FileUtil.run_watched(argv, (ok) => {
                     trash_finished(ok, count);
                     changed();
                 });
@@ -163,16 +152,10 @@ namespace Dokku {
         }
 
         private void empty_trash() {
-            try {
-                // Use gio to properly empty trash
-                string[] argv = {"gio", "trash", "--empty"};
-                Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
-            } catch (Error e) {
-                // Fallback to manual deletion
-                var trash_files = Path.build_filename(Environment.get_home_dir(), ".local/share/Trash/files");
-                var trash_info = Path.build_filename(Environment.get_home_dir(), ".local/share/Trash/info");
-                clear_directory(trash_files);
-                clear_directory(trash_info);
+            // gio empties the trash properly; without it, delete the files by hand
+            if (!FileUtil.run_detached("gio trash --empty")) {
+                clear_directory(trash_path);
+                clear_directory(Path.build_filename(Path.get_dirname(trash_path), "info"));
             }
         }
 
