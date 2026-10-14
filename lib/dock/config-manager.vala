@@ -236,256 +236,161 @@ namespace Dokku {
             return true;
         }
 
-        public string[] get_pinned_apps() {
-            try {
-                return keyfile.get_string_list("Dock", "pinned");
-            } catch (Error e) {
-                return {"org.gnome.Nautilus", "org.gnome.Terminal", "firefox"};
+        // --- Typed access to the key file: a missing or malformed key reads as `fallback` ---
+
+        private bool read_bool(string group, string key, bool fallback) {
+            try { return keyfile.get_boolean(group, key); } catch (Error e) { return fallback; }
+        }
+
+        private int read_int(string group, string key, int fallback) {
+            try { return keyfile.get_integer(group, key); } catch (Error e) { return fallback; }
+        }
+
+        private double read_double(string group, string key, double fallback) {
+            try { return keyfile.get_double(group, key); } catch (Error e) { return fallback; }
+        }
+
+        private string read_string(string group, string key, string fallback) {
+            try { return keyfile.get_string(group, key); } catch (Error e) { return fallback; }
+        }
+
+        private string[] read_list(string group, string key, string[] fallback = {}) {
+            try { return keyfile.get_string_list(group, key); } catch (Error e) { return fallback; }
+        }
+
+        private void write_bool(string group, string key, bool value) {
+            keyfile.set_boolean(group, key, value);
+            save();
+        }
+
+        private void write_int(string group, string key, int value) {
+            keyfile.set_integer(group, key, value);
+            save();
+        }
+
+        private void write_double(string group, string key, double value) {
+            keyfile.set_double(group, key, value);
+            save();
+        }
+
+        private void write_string(string group, string key, string value) {
+            keyfile.set_string(group, key, value);
+            save();
+        }
+
+        private void write_list(string group, string key, string[] value) {
+            keyfile.set_string_list(group, key, value);
+            save();
+        }
+
+        private static string[] without(string[] list, string item) {
+            string[] result = {};
+            foreach (var entry in list) {
+                if (entry != item) result += entry;
             }
+            return result;
         }
 
-        public void set_pinned_apps(string[] apps) {
-            keyfile.set_string_list("Dock", "pinned", apps);
-            save();
+        // --- Dock ---
+
+        public string[] get_pinned_apps() {
+            return read_list("Dock", "pinned", {"org.gnome.Nautilus", "org.gnome.Terminal", "firefox"});
         }
 
-        public int get_icon_size() {
-            try { return keyfile.get_integer("Dock", "icon_size").clamp(16, 128); }
-            catch (Error e) { return 48; }
-        }
+        public void set_pinned_apps(string[] apps) { write_list("Dock", "pinned", apps); }
 
-        public void set_icon_size(int size) {
-            keyfile.set_integer("Dock", "icon_size", size);
-            save();
-        }
+        public int get_icon_size() { return read_int("Dock", "icon_size", 48).clamp(16, 128); }
+        public void set_icon_size(int size) { write_int("Dock", "icon_size", size); }
 
-        public bool get_auto_hide() {
-            try { return keyfile.get_boolean("Dock", "auto_hide"); }
-            catch (Error e) { return false; }
-        }
+        public bool get_auto_hide() { return read_bool("Dock", "auto_hide", false); }
+        public void set_auto_hide(bool enabled) { write_bool("Dock", "auto_hide", enabled); }
 
-        public void set_auto_hide(bool enabled) {
-            keyfile.set_boolean("Dock", "auto_hide", enabled);
-            save();
-        }
+        public string get_position() { return read_string("Dock", "position", "bottom"); }
+        public void set_position(string pos) { write_string("Dock", "position", pos); }
 
-        public string get_position() {
-            try { return keyfile.get_string("Dock", "position"); }
-            catch (Error e) { return "bottom"; }
-        }
+        public double get_magnification() { return read_double("Dock", "magnification", 1.5).clamp(1.0, 3.0); }
+        public void set_magnification(double mag) { write_double("Dock", "magnification", mag); }
 
-        public void set_position(string pos) {
-            keyfile.set_string("Dock", "position", pos);
-            save();
-        }
+        public string get_theme() { return read_string("Dock", "theme", "default"); }
+        public void set_theme(string theme) { write_string("Dock", "theme", theme); }
 
-        public double get_magnification() {
-            try { return keyfile.get_double("Dock", "magnification").clamp(1.0, 3.0); }
-            catch (Error e) { return 1.5; }
-        }
+        public int get_hide_delay() { return read_int("Dock", "hide_delay", 500).clamp(100, 5000); }
+        public void set_hide_delay(int delay) { write_int("Dock", "hide_delay", delay); }
 
-        public void set_magnification(double mag) {
-            keyfile.set_double("Dock", "magnification", mag);
-            save();
-        }
-        public string get_theme() {
-            try { return keyfile.get_string("Dock", "theme"); }
-            catch (Error e) { return "default"; }
-        }
+        public bool get_multi_monitor() { return read_bool("Dock", "multi_monitor", false); }
+        public void set_multi_monitor(bool enabled) { write_bool("Dock", "multi_monitor", enabled); }
 
-        public void set_theme(string theme) {
-            keyfile.set_string("Dock", "theme", theme);
-            save();
-        }
+        public bool get_rounded_corners() { return read_bool("Dock", "rounded_corners", true); }
+        public void set_rounded_corners(bool enabled) { write_bool("Dock", "rounded_corners", enabled); }
 
-        public int get_hide_delay() {
-            try { return keyfile.get_integer("Dock", "hide_delay").clamp(100, 5000); }
-            catch (Error e) { return 500; }
-        }
+        public double get_dock_opacity() { return read_double("Dock", "dock_opacity", 0.55).clamp(0.1, 1.0); }
+        public void set_dock_opacity(double opacity) { write_double("Dock", "dock_opacity", opacity); }
 
-        public void set_hide_delay(int delay) {
-            keyfile.set_integer("Dock", "hide_delay", delay);
-            save();
-        }
+        public bool get_notification_badges() { return read_bool("Dock", "notification_badges", true); }
+        public void set_notification_badges(bool enabled) { write_bool("Dock", "notification_badges", enabled); }
 
-        public bool get_multi_monitor() {
-            try { return keyfile.get_boolean("Dock", "multi_monitor"); }
-            catch (Error e) { return false; }
-        }
+        public bool get_launch_bounce() { return read_bool("Dock", "launch_bounce", true); }
+        public void set_launch_bounce(bool enabled) { write_bool("Dock", "launch_bounce", enabled); }
 
-        public void set_multi_monitor(bool enabled) {
-            keyfile.set_boolean("Dock", "multi_monitor", enabled);
-            save();
-        }
+        public bool get_blur_enabled() { return read_bool("Dock", "blur_enabled", false); }
+        public void set_blur_enabled(bool enabled) { write_bool("Dock", "blur_enabled", enabled); }
 
-        public bool get_rounded_corners() {
-            try { return keyfile.get_boolean("Dock", "rounded_corners"); }
-            catch (Error e) { return true; }
-        }
+        public bool get_dodge_windows() { return read_bool("Dock", "dodge_windows", false); }
+        public void set_dodge_windows(bool enabled) { write_bool("Dock", "dodge_windows", enabled); }
 
-        public void set_rounded_corners(bool enabled) {
-            keyfile.set_boolean("Dock", "rounded_corners", enabled);
-            save();
-        }
-
-        public double get_dock_opacity() {
-            try { return keyfile.get_double("Dock", "dock_opacity").clamp(0.1, 1.0); }
-            catch (Error e) { return 0.55; }
-        }
-
-        public void set_dock_opacity(double opacity) {
-            keyfile.set_double("Dock", "dock_opacity", opacity);
-            save();
-        }
-
-        public bool get_notification_badges() {
-            try { return keyfile.get_boolean("Dock", "notification_badges"); }
-            catch (Error e) { return true; }
-        }
-
-        public void set_notification_badges(bool enabled) {
-            keyfile.set_boolean("Dock", "notification_badges", enabled);
-            save();
-        }
-
-        public bool get_launch_bounce() {
-            try { return keyfile.get_boolean("Dock", "launch_bounce"); }
-            catch (Error e) { return true; }
-        }
-
-        public void set_launch_bounce(bool enabled) {
-            keyfile.set_boolean("Dock", "launch_bounce", enabled);
-            save();
-        }
-
-        public bool get_blur_enabled() {
-            try { return keyfile.get_boolean("Dock", "blur_enabled"); }
-            catch (Error e) { return false; }
-        }
-
-        public void set_blur_enabled(bool enabled) {
-            keyfile.set_boolean("Dock", "blur_enabled", enabled);
-            save();
-        }
-
-
-        public bool get_dodge_windows() {
-            try { return keyfile.get_boolean("Dock", "dodge_windows"); }
-            catch (Error e) { return false; }
-        }
-
-        public void set_dodge_windows(bool enabled) {
-            keyfile.set_boolean("Dock", "dodge_windows", enabled);
-            save();
-        }
-
-        public bool get_media_widget() {
-            try { return keyfile.get_boolean("Dock", "media_widget"); }
-            catch (Error e) { return true; }
-        }
-
-        public void set_media_widget(bool enabled) {
-            keyfile.set_boolean("Dock", "media_widget", enabled);
-            save();
-        }
+        public bool get_media_widget() { return read_bool("Dock", "media_widget", true); }
+        public void set_media_widget(bool enabled) { write_bool("Dock", "media_widget", enabled); }
 
         // Clicking the icon of the app that has focus minimizes it
-        public bool get_minimize_on_click() {
-            try { return keyfile.get_boolean("Dock", "minimize_on_click"); }
-            catch (Error e) { return true; }
-        }
-
-        public void set_minimize_on_click(bool enabled) {
-            keyfile.set_boolean("Dock", "minimize_on_click", enabled);
-            save();
-        }
+        public bool get_minimize_on_click() { return read_bool("Dock", "minimize_on_click", true); }
+        public void set_minimize_on_click(bool enabled) { write_bool("Dock", "minimize_on_click", enabled); }
 
         // Players the media widget ignores, matched against the MPRIS bus name
         public string[] get_media_blocked_players() {
-            try { return keyfile.get_string_list("Media", "blocked_players"); }
-            catch (Error e) { return MediaPlayerPicker.DEFAULT_BLOCKED; }
+            return read_list("Media", "blocked_players", MediaPlayerPicker.DEFAULT_BLOCKED);
         }
 
-        public void set_media_blocked_players(string[] players) {
-            keyfile.set_string_list("Media", "blocked_players", players);
-            save();
-        }
+        public void set_media_blocked_players(string[] players) { write_list("Media", "blocked_players", players); }
 
         public bool get_plugin_enabled(string plugin_id, bool default_value = true) {
-            try {
-                return keyfile.get_boolean("Plugins", plugin_id);
-            } catch (Error e) {
-                return default_value;
-            }
+            return read_bool("Plugins", plugin_id, default_value);
         }
 
-        public void set_plugin_enabled(string plugin_id, bool enabled) {
-            keyfile.set_boolean("Plugins", plugin_id, enabled);
-            save();
-        }
+        public void set_plugin_enabled(string plugin_id, bool enabled) { write_bool("Plugins", plugin_id, enabled); }
+
+        // --- Launcher ---
+
         // Where the launcher's "search the web" row goes; %s stands for the words.
         // Empty turns the row off.
         public string get_web_search_url() {
-            try { return keyfile.get_string("Launcher", "web_search_url"); }
-            catch (Error e) { return QuickResults.DEFAULT_WEB_SEARCH; }
+            return read_string("Launcher", "web_search_url", QuickResults.DEFAULT_WEB_SEARCH);
         }
 
-        public void set_web_search_url(string url) {
-            keyfile.set_string("Launcher", "web_search_url", url);
-            save();
-        }
+        public void set_web_search_url(string url) { write_string("Launcher", "web_search_url", url); }
 
-        public bool get_launcher_fade() {
-            try { return keyfile.get_boolean("Launcher", "fade_effect"); }
-            catch (Error e) { return true; }
-        }
-
-        public void set_launcher_fade(bool enabled) {
-            keyfile.set_boolean("Launcher", "fade_effect", enabled);
-            save();
-        }
+        public bool get_launcher_fade() { return read_bool("Launcher", "fade_effect", true); }
+        public void set_launcher_fade(bool enabled) { write_bool("Launcher", "fade_effect", enabled); }
 
         // Collect big categories into one folder each in the launcher's All view
-        public bool get_group_apps() {
-            try { return keyfile.get_boolean("Launcher", "group_apps"); }
-            catch (Error e) { return true; }
-        }
+        public bool get_group_apps() { return read_bool("Launcher", "group_apps", true); }
+        public void set_group_apps(bool enabled) { write_bool("Launcher", "group_apps", enabled); }
 
-        public void set_group_apps(bool enabled) {
-            keyfile.set_boolean("Launcher", "group_apps", enabled);
-            save();
-        }
-
-        public string[] get_hidden_apps() {
-            try {
-                return keyfile.get_string_list("Launcher", "hidden");
-            } catch (Error e) {
-                return {};
-            }
-        }
+        public string[] get_hidden_apps() { return read_list("Launcher", "hidden"); }
 
         public void set_hidden_apps(string[] apps) {
             _hidden_apps_set = null;  // invalidate cache
-            keyfile.set_string_list("Launcher", "hidden", apps);
-            save();
+            write_list("Launcher", "hidden", apps);
         }
 
         public void hide_app(string app_id) {
             var hidden = get_hidden_apps();
-            foreach (var id in hidden) {
-                if (id == app_id) return;
-            }
+            if (app_id in hidden) return;
             hidden += app_id;
             set_hidden_apps(hidden);
         }
 
         public void unhide_app(string app_id) {
-            var hidden = get_hidden_apps();
-            string[] new_hidden = {};
-            foreach (var id in hidden) {
-                if (id != app_id) new_hidden += id;
-            }
-            set_hidden_apps(new_hidden);
+            set_hidden_apps(without(get_hidden_apps(), app_id));
         }
 
         // Lazily built set for O(1) repeated lookups; nulled whenever set_hidden_apps() writes
@@ -501,29 +406,16 @@ namespace Dokku {
             return _hidden_apps_set.contains(app_id);
         }
 
-        // Folder management
-        public string[] get_folder_ids() {
-            try {
-                return keyfile.get_string_list("Folders", "ids");
-            } catch (Error e) {
-                return {};
-            }
-        }
+        // --- Folders ---
+
+        public string[] get_folder_ids() { return read_list("Folders", "ids"); }
 
         public string get_folder_name(string folder_id) {
-            try {
-                return keyfile.get_string("Folder_" + folder_id, "name");
-            } catch (Error e) {
-                return "Folder";
-            }
+            return read_string("Folder_" + folder_id, "name", "Folder");
         }
 
         public string[] get_folder_apps(string folder_id) {
-            try {
-                return keyfile.get_string_list("Folder_" + folder_id, "apps");
-            } catch (Error e) {
-                return {};
-            }
+            return read_list("Folder_" + folder_id, "apps");
         }
 
         public void create_folder(string folder_id, string name, string[] apps) {
@@ -531,87 +423,69 @@ namespace Dokku {
                 warning("Invalid folder ID rejected: %s", folder_id);
                 return;
             }
-            var ids = get_folder_ids();
-            bool exists = false;
-            foreach (var id in ids) {
-                if (id == folder_id) { exists = true; break; }
-            }
-            if (!exists) {
-                ids += folder_id;
-                keyfile.set_string_list("Folders", "ids", ids);
-            }
+            add_id("Folders", folder_id);
             keyfile.set_string("Folder_" + folder_id, "name", name);
-            keyfile.set_string_list("Folder_" + folder_id, "apps", apps);
-            save();
+            write_list("Folder_" + folder_id, "apps", apps);
+        }
+
+        // Add `id` to the list of ids kept in `group`, once
+        private void add_id(string group, string id) {
+            var ids = read_list(group, "ids");
+            if (id in ids) return;
+            ids += id;
+            keyfile.set_string_list(group, "ids", ids);
         }
 
         public void rename_folder(string folder_id, string name) {
             if (!is_valid_id(folder_id)) return;
-            keyfile.set_string("Folder_" + folder_id, "name", name);
-            save();
+            write_string("Folder_" + folder_id, "name", name);
         }
 
         public void add_app_to_folder(string folder_id, string app_id) {
             var apps = get_folder_apps(folder_id);
-            foreach (var a in apps) {
-                if (a == app_id) return;
-            }
+            if (app_id in apps) return;
             apps += app_id;
-            keyfile.set_string_list("Folder_" + folder_id, "apps", apps);
-            save();
+            write_list("Folder_" + folder_id, "apps", apps);
         }
 
         public void remove_app_from_folder(string folder_id, string app_id) {
-            var apps = get_folder_apps(folder_id);
-            string[] new_apps = {};
-            foreach (var a in apps) {
-                if (a != app_id) new_apps += a;
-            }
-            keyfile.set_string_list("Folder_" + folder_id, "apps", new_apps);
-            save();
+            write_list("Folder_" + folder_id, "apps", without(get_folder_apps(folder_id), app_id));
         }
 
         public void delete_folder(string folder_id) {
-            var ids = get_folder_ids();
-            string[] new_ids = {};
-            foreach (var id in ids) {
-                if (id != folder_id) new_ids += id;
-            }
-            keyfile.set_string_list("Folders", "ids", new_ids);
+            remove_entry("Folders", "Folder_", folder_id);
+        }
+
+        // Drop `id` from the list in `list_group` and remove its own section, prefix + id
+        private void remove_entry(string list_group, string section_prefix, string id) {
+            keyfile.set_string_list(list_group, "ids", without(read_list(list_group, "ids"), id));
             try {
-                keyfile.remove_group("Folder_" + folder_id);
+                keyfile.remove_group(section_prefix + id);
             } catch (Error e) {}
             save();
         }
 
         public void move_folder_to_position(string folder_id, int position) {
-            var ids = get_folder_ids();
-            string[] without = {};
-            foreach (var id in ids) {
-                if (id != folder_id) without += id;
-            }
-            if (position < 0) position = 0;
-            if (position > without.length) position = without.length;
+            string[] rest = without(get_folder_ids(), folder_id);
+            position = position.clamp(0, rest.length);
             string[] result = {};
-            for (int i = 0; i < without.length; i++) {
+            for (int i = 0; i < rest.length; i++) {
                 if (i == position) result += folder_id;
-                result += without[i];
+                result += rest[i];
             }
-            if (position >= without.length) result += folder_id;
-            keyfile.set_string_list("Folders", "ids", result);
-            save();
+            if (position >= rest.length) result += folder_id;
+            write_list("Folders", "ids", result);
         }
 
         public string? get_app_folder(string app_id) {
             foreach (var folder_id in get_folder_ids()) {
-                foreach (var a in get_folder_apps(folder_id)) {
-                    if (a == app_id) return folder_id;
-                }
+                if (app_id in get_folder_apps(folder_id)) return folder_id;
             }
             return null;
         }
 
-        // Custom icon overrides
+        // --- Custom icon overrides ---
+
         public string? get_custom_icon(string app_id) {
             try {
                 return keyfile.get_string("Icons", app_id);
@@ -620,10 +494,7 @@ namespace Dokku {
             }
         }
 
-        public void set_custom_icon(string app_id, string icon_name) {
-            keyfile.set_string("Icons", app_id, icon_name);
-            save();
-        }
+        public void set_custom_icon(string app_id, string icon_name) { write_string("Icons", app_id, icon_name); }
 
         public void clear_custom_icon(string app_id) {
             try {
@@ -632,93 +503,40 @@ namespace Dokku {
             } catch (Error e) {}
         }
 
-        // Hotkey configuration methods
-        public string get_launcher_hotkey() {
-            try {
-                return keyfile.get_string("Hotkeys", "launcher");
-            } catch (Error e) {
-                return "Super_L";
-            }
-        }
+        // --- Hotkeys ---
 
-        public void set_launcher_hotkey(string hotkey) {
-            keyfile.set_string("Hotkeys", "launcher", hotkey);
-            save();
-        }
+        public string get_launcher_hotkey() { return read_string("Hotkeys", "launcher", "Super_L"); }
+        public void set_launcher_hotkey(string hotkey) { write_string("Hotkeys", "launcher", hotkey); }
 
-        public string get_app_hotkey_id(int slot) {
-            try {
-                return keyfile.get_string("Hotkeys", "app_%d_id".printf(slot));
-            } catch (Error e) {
-                return "";
-            }
-        }
+        public string get_app_hotkey_id(int slot) { return read_string("Hotkeys", "app_%d_id".printf(slot), ""); }
+        public void set_app_hotkey_id(int slot, string app_id) { write_string("Hotkeys", "app_%d_id".printf(slot), app_id); }
 
-        public void set_app_hotkey_id(int slot, string app_id) {
-            keyfile.set_string("Hotkeys", "app_%d_id".printf(slot), app_id);
-            save();
-        }
-
-        public string get_app_hotkey(int slot) {
-            try {
-                return keyfile.get_string("Hotkeys", "app_%d_hotkey".printf(slot));
-            } catch (Error e) {
-                return "";
-            }
-        }
-
-        public void set_app_hotkey(int slot, string hotkey) {
-            keyfile.set_string("Hotkeys", "app_%d_hotkey".printf(slot), hotkey);
-            save();
-        }
+        public string get_app_hotkey(int slot) { return read_string("Hotkeys", "app_%d_hotkey".printf(slot), ""); }
+        public void set_app_hotkey(int slot, string hotkey) { write_string("Hotkeys", "app_%d_hotkey".printf(slot), hotkey); }
 
         // --- Usage Tracking [Usage] group ---
 
-        public int get_usage_count(string app_id) {
-            try {
-                return keyfile.get_integer("Usage", app_id);
-            } catch (Error e) {
-                return 0;
-            }
-        }
+        public int get_usage_count(string app_id) { return read_int("Usage", app_id, 0); }
 
+        // Saved later by UsageTracker, in one write
         public void increment_usage(string app_id) {
-            int count = get_usage_count(app_id);
-            keyfile.set_integer("Usage", app_id, count + 1);
+            keyfile.set_integer("Usage", app_id, get_usage_count(app_id) + 1);
         }
 
         // --- Custom Shortcuts [Shortcuts] group ---
 
-        public string[] get_shortcut_ids() {
-            try {
-                return keyfile.get_string_list("Shortcuts", "ids");
-            } catch (Error e) {
-                return {};
-            }
-        }
+        public string[] get_shortcut_ids() { return read_list("Shortcuts", "ids"); }
 
         public string get_shortcut_name(string shortcut_id) {
-            try {
-                return keyfile.get_string("Shortcut_" + shortcut_id, "name");
-            } catch (Error e) {
-                return "Untitled";
-            }
+            return read_string("Shortcut_" + shortcut_id, "name", "Untitled");
         }
 
         public string get_shortcut_command(string shortcut_id) {
-            try {
-                return keyfile.get_string("Shortcut_" + shortcut_id, "command");
-            } catch (Error e) {
-                return "";
-            }
+            return read_string("Shortcut_" + shortcut_id, "command", "");
         }
 
         public string get_shortcut_icon(string shortcut_id) {
-            try {
-                return keyfile.get_string("Shortcut_" + shortcut_id, "icon");
-            } catch (Error e) {
-                return "application-x-executable";
-            }
+            return read_string("Shortcut_" + shortcut_id, "icon", "application-x-executable");
         }
 
         public void create_shortcut(string shortcut_id, string name, string command, string icon) {
@@ -726,39 +544,20 @@ namespace Dokku {
                 warning("Invalid shortcut ID rejected: %s", shortcut_id);
                 return;
             }
-            var ids = get_shortcut_ids();
-            bool exists = false;
-            foreach (var id in ids) {
-                if (id == shortcut_id) { exists = true; break; }
-            }
-            if (!exists) {
-                ids += shortcut_id;
-                keyfile.set_string_list("Shortcuts", "ids", ids);
-            }
-            keyfile.set_string("Shortcut_" + shortcut_id, "name", name);
-            keyfile.set_string("Shortcut_" + shortcut_id, "command", command);
-            keyfile.set_string("Shortcut_" + shortcut_id, "icon", icon);
-            save();
+            add_id("Shortcuts", shortcut_id);
+            update_shortcut(shortcut_id, name, command, icon);
         }
 
         public void update_shortcut(string shortcut_id, string name, string command, string icon) {
-            keyfile.set_string("Shortcut_" + shortcut_id, "name", name);
-            keyfile.set_string("Shortcut_" + shortcut_id, "command", command);
-            keyfile.set_string("Shortcut_" + shortcut_id, "icon", icon);
+            string section = "Shortcut_" + shortcut_id;
+            keyfile.set_string(section, "name", name);
+            keyfile.set_string(section, "command", command);
+            keyfile.set_string(section, "icon", icon);
             save();
         }
 
         public void delete_shortcut(string shortcut_id) {
-            var ids = get_shortcut_ids();
-            string[] new_ids = {};
-            foreach (var id in ids) {
-                if (id != shortcut_id) new_ids += id;
-            }
-            keyfile.set_string_list("Shortcuts", "ids", new_ids);
-            try {
-                keyfile.remove_group("Shortcut_" + shortcut_id);
-            } catch (Error e) {}
-            save();
+            remove_entry("Shortcuts", "Shortcut_", shortcut_id);
         }
     }
 }
