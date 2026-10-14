@@ -87,23 +87,25 @@ namespace Dokku {
             self.handle_event(event, toplevel);
         }
 
+        private void announce_change() {
+            update_active();
+            windows_changed();
+            window_state_changed();
+        }
+
         private void handle_event(Wl.ToplevelEvent event, Wl.Toplevel toplevel) {
             void* key = (void*) toplevel;
             switch (event) {
                 case Wl.ToplevelEvent.ADDED:
                     windows.set(key, new WaylandWindow(toplevel));
-                    update_active();
-                    windows_changed();
-                    window_state_changed();
+                    announce_change();
                     break;
                 case Wl.ToplevelEvent.CHANGED:
                     var changed = windows.get(key);
                     if (changed == null) break;
                     changed.refresh();
-                    update_active();
                     // A title or app_id change can alter which app a window belongs to
-                    windows_changed();
-                    window_state_changed();
+                    announce_change();
                     break;
                 case Wl.ToplevelEvent.CLOSED:
                     var closed = windows.get(key);
@@ -111,9 +113,7 @@ namespace Dokku {
                     closed.handle = null;
                     hidden_by_show_desktop.remove(closed);
                     windows.remove(key);
-                    update_active();
-                    windows_changed();
-                    window_state_changed();
+                    announce_change();
                     break;
             }
         }

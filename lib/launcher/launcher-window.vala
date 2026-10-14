@@ -1549,17 +1549,23 @@ namespace Dokku {
             }
 
             search_entry.grab_focus();
+            run_fade(true, null);
+        }
 
+        private delegate void FadeDone();
+
+        // Animate the window's opacity up from transparent, or down to it, then call `done`
+        private void run_fade(bool fade_in, owned FadeDone? done) {
             int64 start_us = GLib.get_monotonic_time();
             fade_tick_id = add_tick_callback((widget, clock) => {
                 int64 elapsed_us = GLib.get_monotonic_time() - start_us;
                 double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                set_fade_level(UiUtil.ease_out_cubic(t));
-                if (t >= 1.0) {
-                    fade_tick_id = 0;
-                    return false;
-                }
-                return true;
+                double eased = UiUtil.ease_out_cubic(t);
+                set_fade_level(fade_in ? eased : 1.0 - eased);
+                if (t < 1.0) return true;
+                fade_tick_id = 0;
+                if (done != null) done();
+                return false;
             });
         }
 
@@ -1574,23 +1580,14 @@ namespace Dokku {
                 return;
             }
             fading_out = true;
-            int64 start_us = GLib.get_monotonic_time();
-            fade_tick_id = add_tick_callback((widget, clock) => {
-                int64 elapsed_us = GLib.get_monotonic_time() - start_us;
-                double t = double.min(1.0, elapsed_us / (FADE_DURATION_MS * 1000.0));
-                set_fade_level(1.0 - UiUtil.ease_out_cubic(t));
-                if (t >= 1.0) {
-                    fade_tick_id = 0;
-                    fading_out = false;
-                    // Unmap while still transparent and leave the opacity at 0.
-                    // A compositor that fades unmapping windows (picom with
-                    // fading on) would otherwise fade a full-opacity ghost out
-                    // a second time. fade_show sets the opacity before mapping.
-                    hide();
-                    trim_pages();
-                    return false;
-                }
-                return true;
+            run_fade(false, () => {
+                fading_out = false;
+                // Unmap while still transparent and leave the opacity at 0.
+                // A compositor that fades unmapping windows (picom with
+                // fading on) would otherwise fade a full-opacity ghost out
+                // a second time. fade_show sets the opacity before mapping.
+                hide();
+                trim_pages();
             });
         }
     }

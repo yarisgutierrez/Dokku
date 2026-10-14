@@ -17,6 +17,18 @@ namespace Dokku {
             this.add_events(Gdk.EventMask.KEY_RELEASE_MASK);
         }
 
+        private void stop_listening() {
+            listening = false;
+            super_pressed = false;
+            update_label();
+        }
+
+        private void finish_capture(string new_hotkey) {
+            hotkey = new_hotkey;
+            stop_listening();
+            hotkey_changed(new_hotkey);
+        }
+
         private void on_clicked() {
             if (!listening) {
                 listening = true;
@@ -50,20 +62,11 @@ namespace Dokku {
 
             // Allow Escape to cancel
             if (event.keyval == Gdk.Key.Escape) {
-                listening = false;
-                super_pressed = false;
-                update_label();
+                stop_listening();
                 return true;
             }
 
-            // Capture the hotkey
-            string new_hotkey = format_hotkey_string(event);
-            hotkey = new_hotkey;
-            listening = false;
-            super_pressed = false;
-            update_label();
-            hotkey_changed(new_hotkey);
-
+            finish_capture(format_hotkey_string(event));
             return true;
         }
 
@@ -74,12 +77,7 @@ namespace Dokku {
 
             // If Super was pressed alone and now released, capture it
             if (super_pressed && (event.keyval == Gdk.Key.Super_L || event.keyval == Gdk.Key.Super_R)) {
-                super_pressed = false;
-                string new_hotkey = "Super_L";
-                hotkey = new_hotkey;
-                listening = false;
-                update_label();
-                hotkey_changed(new_hotkey);
+                finish_capture("Super_L");
                 return true;
             }
 
@@ -88,11 +86,7 @@ namespace Dokku {
         }
 
         private bool on_focus_out(Gdk.EventFocus event) {
-            if (listening) {
-                listening = false;
-                super_pressed = false;
-                update_label();
-            }
+            if (listening) stop_listening();
             return false;
         }
 

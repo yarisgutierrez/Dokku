@@ -144,12 +144,14 @@ namespace Dokku {
             try_classify_progress_window(window);
         }
 
+        private void forget_name_handler(Wnck.Window window) {
+            if (!name_handlers.contains(window)) return;
+            window.disconnect(name_handlers.get(window));
+            name_handlers.remove(window);
+        }
+
         private void on_wnck_window_closed(Wnck.Window window) {
-            // Disconnect name_changed handler
-            if (name_handlers.contains(window)) {
-                window.disconnect(name_handlers.get(window));
-                name_handlers.remove(window);
-            }
+            forget_name_handler(window);
 
             if (progress_windows.contains(window)) {
                 string app_id = progress_windows.get(window);
@@ -182,10 +184,7 @@ namespace Dokku {
 #endif
 
             // Stop listening for name changes once classified
-            if (name_handlers.contains(window)) {
-                window.disconnect(name_handlers.get(window));
-                name_handlers.remove(window);
-            }
+            forget_name_handler(window);
         }
 
         private bool looks_like_progress_window(Wnck.Window window) {

@@ -115,14 +115,18 @@ namespace Dokku {
             var reset_btn = new Gtk.Button.with_label("Reset Icon");
             reset_btn.tooltip_text = "Restore the application's default icon";
             reset_btn.sensitive = current_custom != null;
-            reset_btn.clicked.connect(() => {
+            // Back to the application's own icon
+            void restore_default() {
                 renderer.clear_icon_cache(item.icon_name);
                 config.clear_custom_icon(item.id);
                 item.icon_name = original_icon;
-                picker.text = original_icon;
                 update_header_icon(icon_image, original_icon);
                 reset_btn.sensitive = false;
                 changed();
+            }
+            reset_btn.clicked.connect(() => {
+                picker.text = original_icon;
+                restore_default();
             });
             action_box.pack_start(reset_btn, false, false, 0);
 
@@ -138,12 +142,7 @@ namespace Dokku {
                     reset_btn.sensitive = true;
                     changed();
                 } else if (new_icon == original_icon) {
-                    renderer.clear_icon_cache(item.icon_name);
-                    config.clear_custom_icon(item.id);
-                    item.icon_name = original_icon;
-                    update_header_icon(icon_image, original_icon);
-                    reset_btn.sensitive = false;
-                    changed();
+                    restore_default();
                 }
             });
             action_box.pack_start(apply_btn, false, false, 0);

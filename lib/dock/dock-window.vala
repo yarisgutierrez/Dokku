@@ -672,26 +672,18 @@ namespace Dokku {
             // (base_height includes magnification headroom above the capsule)
             int capsule = icon_area_height;
 
-            if (dock_position == "top") {
+            if (dock_position == "left" || dock_position == "right") {
+                rect.width = capsule;
+                rect.height = dock_length;
+                rect.x = dock_position == "left" ? geo.x + dock_margin_bottom
+                                                 : geo.x + geo.width - rect.width - dock_margin_bottom;
+                rect.y = geo.y + (geo.height - rect.height) / 2;
+            } else {  // top or bottom
                 rect.width = dock_length;
                 rect.height = capsule;
                 rect.x = geo.x + (geo.width - rect.width) / 2;
-                rect.y = geo.y + dock_margin_bottom;
-            } else if (dock_position == "left") {
-                rect.width = capsule;
-                rect.height = dock_length;
-                rect.x = geo.x + dock_margin_bottom;
-                rect.y = geo.y + (geo.height - rect.height) / 2;
-            } else if (dock_position == "right") {
-                rect.width = capsule;
-                rect.height = dock_length;
-                rect.x = geo.x + geo.width - rect.width - dock_margin_bottom;
-                rect.y = geo.y + (geo.height - rect.height) / 2;
-            } else { // bottom
-                rect.width = dock_length;
-                rect.height = capsule;
-                rect.x = geo.x + (geo.width - rect.width) / 2;
-                rect.y = geo.y + geo.height - rect.height - dock_margin_bottom;
+                rect.y = dock_position == "top" ? geo.y + dock_margin_bottom
+                                                : geo.y + geo.height - rect.height - dock_margin_bottom;
             }
             return rect;
         }

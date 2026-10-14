@@ -159,29 +159,25 @@ namespace Dokku {
                          string dock_position, int icon_area_height) {
             if (window == null) return;
 
-            double margin = 2;
+            // The capsule sits `margin` in from the dock's edge: along it for top and
+            // bottom, across it for left and right
+            const int MARGIN = 2;
+            int along = (int)(dock_dim - MARGIN * 2);
+            int centred = (int)dock_dim;
             int bg_x, bg_y, bg_w, bg_h;
 
-            if (dock_position == "bottom") {
-                bg_w = (int)(dock_dim - margin * 2);
+            if (dock_position == "top" || dock_position == "bottom") {
+                bg_w = along;
                 bg_h = icon_area_height;
-                bg_x = dock_x + (dock_w - (int)dock_dim) / 2 + (int)margin;
-                bg_y = dock_y + dock_h - icon_area_height - (int)margin;
-            } else if (dock_position == "top") {
-                bg_w = (int)(dock_dim - margin * 2);
-                bg_h = icon_area_height;
-                bg_x = dock_x + (dock_w - (int)dock_dim) / 2 + (int)margin;
-                bg_y = dock_y + (int)margin;
-            } else if (dock_position == "left") {
+                bg_x = dock_x + (dock_w - centred) / 2 + MARGIN;
+                bg_y = dock_position == "top" ? dock_y + MARGIN
+                                              : dock_y + dock_h - icon_area_height - MARGIN;
+            } else {
                 bg_w = icon_area_height;
-                bg_h = (int)(dock_dim - margin * 2);
-                bg_x = dock_x + (int)margin;
-                bg_y = dock_y + (dock_h - (int)dock_dim) / 2 + (int)margin;
-            } else { // right
-                bg_w = icon_area_height;
-                bg_h = (int)(dock_dim - margin * 2);
-                bg_x = dock_x + dock_w - icon_area_height - (int)margin;
-                bg_y = dock_y + (dock_h - (int)dock_dim) / 2 + (int)margin;
+                bg_h = along;
+                bg_x = dock_position == "left" ? dock_x + MARGIN
+                                               : dock_x + dock_w - icon_area_height - MARGIN;
+                bg_y = dock_y + (dock_h - centred) / 2 + MARGIN;
             }
 
             bg_w = int.max(bg_w, 1);

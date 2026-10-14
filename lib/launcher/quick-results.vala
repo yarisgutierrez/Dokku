@@ -114,19 +114,22 @@ namespace Dokku {
             return base_value;
         }
 
+        // A parenthesised expression; the cursor is on the '('
+        private double parse_group() {
+            if (++depth > MAX_DEPTH) { failed = true; return 0; }
+            pos++;
+            double value = parse_expr();
+            depth--;
+            if (failed || peek() != ')') { failed = true; return 0; }
+            pos++;
+            return value;
+        }
+
         private double parse_atom() {
             if (failed) return 0;
             char c = peek();
 
-            if (c == '(') {
-                if (++depth > MAX_DEPTH) { failed = true; return 0; }
-                pos++;
-                double value = parse_expr();
-                depth--;
-                if (failed || peek() != ')') { failed = true; return 0; }
-                pos++;
-                return value;
-            }
+            if (c == '(') return parse_group();
 
             if ((c >= '0' && c <= '9') || c == '.') return parse_number();
 
@@ -138,12 +141,8 @@ namespace Dokku {
                 }
                 string name = text.substring(start, pos - start).down();
                 if (peek() == '(') {
-                    if (++depth > MAX_DEPTH) { failed = true; return 0; }
-                    pos++;
-                    double arg = parse_expr();
-                    depth--;
-                    if (failed || peek() != ')') { failed = true; return 0; }
-                    pos++;
+                    double arg = parse_group();
+                    if (failed) return 0;
                     used_operation = true;
                     return apply_function(name, arg);
                 }
