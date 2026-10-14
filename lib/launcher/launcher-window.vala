@@ -9,7 +9,10 @@ namespace Dokku {
         private Gtk.Box category_bar;
         private string active_category = "All";
         private List<weak AppInfo> filtered_apps;
-        private List<string> ordered_items;
+        // What the grid shows, in order: "app:id", "folder:id", "group:category" or "shortcut:id"
+        private GenericArray<string> ordered_items = new GenericArray<string>();
+        // Pages are filled with tiles the first time they are shown
+        private bool[] page_filled = {};
         // Apps currently collected into each category group, by category name
         private HashTable<string, GenericArray<weak AppInfo>> category_groups =
             new HashTable<string, GenericArray<weak AppInfo>>(str_hash, str_equal);
@@ -77,7 +80,6 @@ namespace Dokku {
             this.config = config;
             this.usage_tracker = usage_tracker;
             filtered_apps = new List<weak AppInfo>();
-            ordered_items = new List<string>();
             icon_cache = new HashTable<string, Gdk.Pixbuf?>(str_hash, str_equal);
             icon_cache_order = new Queue<string>();
 
@@ -479,7 +481,7 @@ namespace Dokku {
             }
 
             // Only when nothing in the grid matches: the words may be for a browser
-            if (!is_calc && ordered_items.length() == 0) {
+            if (!is_calc && ordered_items.length == 0) {
                 string? web = QuickResults.web_search_uri(config.get_web_search_url(), text);
                 if (web != null) {
                     var row = make_quick_row(
@@ -555,10 +557,10 @@ namespace Dokku {
             string query = search_entry.text.down();
 
             // Collect items: folders + shortcuts + apps
-            var items = new List<string>();
+            var items = new GenericArray<string>();
             if (search_entry.text == "") {
                 foreach (var folder_id in config.get_folder_ids()) {
-                    items.append("folder:" + folder_id);
+                    items.add("folder:" + folder_id);
                 }
             }
             // Custom shortcuts (only in "All" category)
@@ -566,7 +568,7 @@ namespace Dokku {
                 foreach (var sid in config.get_shortcut_ids()) {
                     string sname = config.get_shortcut_name(sid);
                     if (query == "" || sname.down().contains(query)) {
-                        items.append("shortcut:" + sid);
+                        items.add("shortcut:" + sid);
                     }
                 }
             }
@@ -600,74 +602,37 @@ namespace Dokku {
                 if (category_groups.contains(category) && is_in_group(category_groups, app)) {
                     // The folder sits where its first app that isn't already in the grid would be
                     if (top_used.contains(app.id)) {
-                        items.append("app:" + app.id);
+                        items.add("app:" + app.id);
                     } else if (!placed.contains(category)) {
-                        items.append("group:" + category);
+                        items.add("group:" + category);
                         placed.set(category, true);
                     }
                     continue;
                 }
-                items.append("app:" + app.id);
+                items.add("app:" + app.id);
             }
             // A folder whose apps are all in the grid already still needs its tile
             category_groups.foreach((category, members) => {
-                if (!placed.contains(category)) items.append("group:" + category);
+                if (!placed.contains(category)) items.add("group:" + category);
             });
 
-            // Store ordered items for Enter-key launch
-            ordered_items = new List<string>();
-            foreach (var item in items) {
-                ordered_items.append(item);
-            }
+            ordered_items = items;
 
             int items_per_page = cols * rows;
-            total_pages = (int)((items.length() + items_per_page - 1) / items_per_page);
-            if (total_pages < 1) total_pages = 1;
-            if (current_page >= total_pages) current_page = total_pages - 1;
-            if (current_page < 0) current_page = 0;
+            total_pages = int.max(1, ((int) items.length + items_per_page - 1) / items_per_page);
+            current_page = current_page.clamp(0, total_pages - 1);
 
-            // Build a Gtk.Grid for each page
+            // One grid per page; only the visible one gets its tiles now
+            page_filled = new bool[total_pages];
             for (int p = 0; p < total_pages; p++) {
                 var grid = new Gtk.Grid();
                 grid.row_spacing = grid_spacing;
                 grid.column_spacing = grid_spacing;
                 grid.halign = Gtk.Align.CENTER;
                 grid.valign = Gtk.Align.CENTER;
-
-                int start = p * items_per_page;
-                int idx = 0;
-
-                foreach (var item in items) {
-                    if (idx < start) { idx++; continue; }
-                    if (idx >= start + items_per_page) break;
-
-                    int pos = idx - start;
-                    int col = pos % cols;
-                    int row = pos / cols;
-
-                    Gtk.Widget widget;
-                    if (item.has_prefix("folder:")) {
-                        widget = create_folder_item(item.substring(7));
-                    } else if (item.has_prefix("shortcut:")) {
-                        widget = create_shortcut_item(item.substring(9));
-                    } else if (item.has_prefix("group:")) {
-                        string category = item.substring(6);
-                        widget = create_group_item(category, category_groups.get(category));
-                    } else {
-                        var app = app_manager.get_app(item.substring(4));
-                        if (app != null) {
-                            widget = create_app_item(app);
-                        } else {
-                            idx++;
-                            continue;
-                        }
-                    }
-                    grid.attach(widget, col, row, 1, 1);
-                    idx++;
-                }
-
                 page_stack.add_named(grid, "page_%d".printf(p));
             }
+            fill_page(current_page);
 
             page_stack.show_all();
 
@@ -678,9 +643,46 @@ namespace Dokku {
             pages_dirty = false;
         }
 
+        // Put the tiles of page `p` into its grid, once
+        private void fill_page(int p) {
+            if (p < 0 || p >= total_pages || page_filled[p]) return;
+            page_filled[p] = true;
+            var grid = page_grid(p);
+            int per_page = cols * rows;
+            int start = p * per_page;
+            for (int idx = start; idx < ordered_items.length && idx < start + per_page; idx++) {
+                var tile = create_tile(ordered_items[idx]);
+                if (tile == null) continue;
+                int pos = idx - start;
+                grid.attach(tile, pos % cols, pos / cols, 1, 1);
+            }
+            grid.show_all();
+        }
+
+        // Free the tiles of every page but the first; they are made again when needed
+        private void trim_pages() {
+            for (int p = 1; p < total_pages; p++) {
+                if (!page_filled[p]) continue;
+                page_filled[p] = false;
+                page_grid(p).foreach((tile) => tile.destroy());
+            }
+        }
+
+        private Gtk.Widget? create_tile(string item) {
+            if (item.has_prefix("folder:")) return create_folder_item(item.substring(7));
+            if (item.has_prefix("shortcut:")) return create_shortcut_item(item.substring(9));
+            if (item.has_prefix("group:")) {
+                string category = item.substring(6);
+                return create_group_item(category, category_groups.get(category));
+            }
+            var app = app_manager.get_app(item.substring(4));
+            return app != null ? create_app_item(app) : null;
+        }
+
         // Animated page switch
         private void go_to_page(int page) {
             if (page < 0 || page >= total_pages || page == current_page) return;
+            fill_page(page);
             current_page = page;
             page_stack.set_visible_child_name("page_%d".printf(current_page));
             update_page_indicator();
@@ -722,50 +724,96 @@ namespace Dokku {
             return false;
         }
 
-        private Gtk.Widget create_app_item(AppInfo app) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
-            btn.get_style_context().add_class("app-item");
+        public delegate void ContextMenuFunc(Gdk.EventButton? event);
 
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-            box.set_data("app-id", app.id);
-
-            var icon = new Gtk.Image();
-            var pixbuf = load_cached_icon(app.icon, icon_size);
-            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
-
-            var label = new Gtk.Label(app.name);
-            label.get_style_context().add_class("app-name");
-            label.max_width_chars = 12;
-            label.ellipsize = Pango.EllipsizeMode.END;
-
-            box.pack_start(icon, false, false, 0);
-            box.pack_start(label, false, false, 0);
-
-            btn.add(box);
-            btn.set_size_request(item_size, item_size);
-
-            // Left click - launch
-            btn.clicked.connect(() => {
-                usage_tracker.record_launch(app.id);
-                app.launch();
-                fade_hide();
-            });
-
-            // Right click - context menu
-            btn.button_press_event.connect((event) => {
-                if (event.button == 3) {
-                    show_app_menu(app, btn, event);
-                    return true;
-                }
-                return false;
-            });
-            // Menu key / Shift+F10
-            btn.popup_menu.connect(() => {
-                show_app_menu(app, btn, null);
+        // Right click, and the keyboard's menu key if `keyboard`, show a menu
+        private void connect_context_menu(Gtk.Widget widget, owned ContextMenuFunc show_menu,
+                                          bool keyboard = false) {
+            widget.button_press_event.connect((event) => {
+                if (event.button != 3) return false;
+                show_menu(event);
                 return true;
             });
+            if (keyboard) {
+                widget.popup_menu.connect(() => {
+                    show_menu(null);
+                    return true;
+                });
+            }
+        }
+
+        private Gtk.Image icon_image(string icon_name, int size, Gtk.IconSize fallback_size = Gtk.IconSize.DIALOG) {
+            var image = new Gtk.Image();
+            var pixbuf = load_cached_icon(icon_name, size);
+            if (pixbuf != null) {
+                image.set_from_pixbuf(pixbuf);
+            } else {
+                image.set_from_icon_name(IconLoader.FALLBACK, fallback_size);
+            }
+            return image;
+        }
+
+        // An icon over a one-line name. Large tiles sit in the grid; the others in the
+        // popover of a folder.
+        private Gtk.Button make_tile(Gtk.Widget icon, string name, bool large, int name_chars = 12) {
+            var btn = new Gtk.Button();
+            btn.relief = Gtk.ReliefStyle.NONE;
+
+            var label = new Gtk.Label(name);
+            label.get_style_context().add_class("app-name");
+            label.max_width_chars = name_chars;
+            label.ellipsize = Pango.EllipsizeMode.END;
+
+            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, large ? 8 : 4);
+            box.pack_start(icon, false, false, 0);
+            box.pack_start(label, false, false, 0);
+            btn.add(box);
+
+            if (large) {
+                btn.get_style_context().add_class("app-item");
+                btn.set_size_request(item_size, item_size);
+            }
+            return btn;
+        }
+
+        // A folder's face: up to nine of its apps' icons in a 3x3 grid
+        private Gtk.Widget make_folder_icon(GenericArray<string> icon_names) {
+            var icon_box = new Gtk.Grid();
+            icon_box.row_spacing = 1;
+            icon_box.column_spacing = 1;
+            icon_box.halign = Gtk.Align.CENTER;
+            icon_box.valign = Gtk.Align.CENTER;
+            for (int i = 0; i < icon_names.length && i < 9; i++) {
+                icon_box.attach(icon_image(icon_names[i], icon_size / 4, Gtk.IconSize.LARGE_TOOLBAR),
+                                i % 3, i / 3, 1, 1);
+            }
+
+            var frame = new Gtk.EventBox();
+            frame.get_style_context().add_class("folder-icon");
+            frame.set_size_request(icon_size, icon_size);
+            frame.add(icon_box);
+            return frame;
+        }
+
+        private void launch_app(AppInfo app) {
+            usage_tracker.record_launch(app.id);
+            app.launch();
+            close_popover();
+            fade_hide();
+        }
+
+        private void run_shortcut(string shortcut_id) {
+            FileUtil.run_detached(config.get_shortcut_command(shortcut_id));
+            usage_tracker.record_launch("shortcut:" + shortcut_id);
+            fade_hide();
+        }
+
+        private Gtk.Widget create_app_item(AppInfo app) {
+            var pixbuf = load_cached_icon(app.icon, icon_size);
+            var btn = make_tile(icon_image(app.icon, icon_size), app.name, true);
+
+            btn.clicked.connect(() => launch_app(app));
+            connect_context_menu(btn, (event) => show_app_menu(app, btn, event), true);
 
             // Drag source - supports text (internal folders) + URI (dock drops)
             Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE | Gdk.DragAction.COPY);
@@ -840,13 +888,7 @@ namespace Dokku {
         private void show_app_menu(AppInfo app, Gtk.Widget anchor, Gdk.EventButton? event) {
             var menu = new Gtk.Menu();
 
-            var open_item = new Gtk.MenuItem.with_label("Open");
-            open_item.activate.connect(() => {
-                usage_tracker.record_launch(app.id);
-                app.launch();
-                fade_hide();
-            });
-            menu.append(open_item);
+            MenuUtil.add_item(menu, "Open", () => launch_app(app));
 
             // The app's own actions from its .desktop file (New Window, Private Window, ...)
             DesktopAppInfo? desktop_info = null;
@@ -854,84 +896,44 @@ namespace Dokku {
                 desktop_info = new DesktopAppInfo.from_filename(app.desktop_file);
             }
             if (desktop_info != null && desktop_info.list_actions().length > 0) {
-                menu.append(new Gtk.SeparatorMenuItem());
+                MenuUtil.add_separator(menu);
                 foreach (var action in desktop_info.list_actions()) {
-                    var action_item = new Gtk.MenuItem.with_label(desktop_info.get_action_name(action));
                     string action_name = action;
-                    action_item.activate.connect(() => {
+                    MenuUtil.add_item(menu, desktop_info.get_action_name(action), () => {
                         var display = Gdk.Display.get_default();
                         desktop_info.launch_action(action_name,
                             display != null ? display.get_app_launch_context() : null);
                         usage_tracker.record_launch(app.id);
                         fade_hide();
                     });
-                    menu.append(action_item);
                 }
             }
 
-            menu.append(new Gtk.SeparatorMenuItem());
+            MenuUtil.add_separator(menu);
 
             if (!is_app_pinned(app)) {
-                var dock_item = new Gtk.MenuItem.with_label("Add to Dock");
-                dock_item.activate.connect(() => {
+                MenuUtil.add_item(menu, "Add to Dock", () => {
                     pin_to_dock_requested(app.id, app.desktop_file ?? "");
                 });
-                menu.append(dock_item);
             }
 
-            var hide_item = new Gtk.MenuItem.with_label("Hide from Launcher");
-            hide_item.activate.connect(() => {
+            MenuUtil.add_item(menu, "Hide from Launcher", () => {
                 // The popover is anchored to a tile that the rebuild below destroys
-                if (folder_popover != null) {
-                    folder_popover.popdown();
-                    folder_popover = null;
-                }
+                close_popover();
                 config.hide_app(app.id);
                 on_search_changed();
             });
-            menu.append(hide_item);
 
-            menu.show_all();
-            if (event != null) {
-                menu.popup_at_pointer(event);
-            } else {
-                menu.popup_at_widget(anchor, Gdk.Gravity.SOUTH, Gdk.Gravity.NORTH, null);
-            }
+            MenuUtil.popup(menu, event, anchor);
         }
 
         private Gtk.Widget create_folder_item(string folder_id) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
-            btn.get_style_context().add_class("app-item");
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-
-            var icon_box = new Gtk.Grid();
-            icon_box.row_spacing = 1;
-            icon_box.column_spacing = 1;
-            icon_box.halign = Gtk.Align.CENTER;
-            icon_box.valign = Gtk.Align.CENTER;
-
-            int mini_icon = icon_size / 4;
-            var apps = config.get_folder_apps(folder_id);
-            int i = 0;
-            foreach (var app_id in apps) {
-                if (i >= 9) break;
+            var icons = new GenericArray<string>();
+            foreach (var app_id in config.get_folder_apps(folder_id)) {
                 var app = app_manager.get_app(app_id);
-                if (app != null) {
-                    var icon = new Gtk.Image();
-                    var pixbuf = load_cached_icon(app.icon, mini_icon);
-                    if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-                    else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.LARGE_TOOLBAR);
-                    icon_box.attach(icon, i % 3, i / 3, 1, 1);
-                    i++;
-                }
+                if (app != null) icons.add(app.icon);
             }
-
-            var folder_frame = new Gtk.EventBox();
-            folder_frame.get_style_context().add_class("folder-icon");
-            folder_frame.set_size_request(icon_size, icon_size);
-            folder_frame.add(icon_box);
+            var btn = make_tile(make_folder_icon(icons), config.get_folder_name(folder_id), true);
 
             // Pop animation for newly created folders
             if (newly_created_folder_id == folder_id) {
@@ -949,28 +951,8 @@ namespace Dokku {
                 });
             }
 
-            var label = new Gtk.Label(config.get_folder_name(folder_id));
-            label.get_style_context().add_class("app-name");
-            label.max_width_chars = 12;
-            label.ellipsize = Pango.EllipsizeMode.END;
-
-            box.pack_start(folder_frame, false, false, 0);
-            box.pack_start(label, false, false, 0);
-
-            btn.add(box);
-            btn.set_size_request(item_size, item_size);
-
-            btn.clicked.connect(() => {
-                open_folder(folder_id, btn);
-            });
-
-            btn.button_press_event.connect((event) => {
-                if (event.button == 3) {
-                    show_folder_menu(folder_id, event);
-                    return true;
-                }
-                return false;
-            });
+            btn.clicked.connect(() => open_folder(folder_id, btn));
+            connect_context_menu(btn, (event) => show_folder_menu(folder_id, event));
 
             // Drag source for reordering folders
             Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE);
@@ -1008,24 +990,14 @@ namespace Dokku {
             return btn;
         }
 
-        private void show_folder_menu(string folder_id, Gdk.EventButton event) {
+        private void show_folder_menu(string folder_id, Gdk.EventButton? event) {
             var menu = new Gtk.Menu();
-
-            var rename_item = new Gtk.MenuItem.with_label("Rename Folder");
-            rename_item.activate.connect(() => {
-                rename_folder_dialog(folder_id);
-            });
-            menu.append(rename_item);
-
-            var delete_item = new Gtk.MenuItem.with_label("Delete Folder");
-            delete_item.activate.connect(() => {
+            MenuUtil.add_item(menu, "Rename Folder", () => rename_folder_dialog(folder_id));
+            MenuUtil.add_item(menu, "Delete Folder", () => {
                 config.delete_folder(folder_id);
                 on_search_changed();
             });
-            menu.append(delete_item);
-
-            menu.show_all();
-            menu.popup_at_pointer(event);
+            MenuUtil.popup(menu, event);
         }
 
         private void rename_folder_dialog(string folder_id) {
@@ -1051,113 +1023,91 @@ namespace Dokku {
             });
         }
 
-        private void open_folder(string folder_id, Gtk.Widget anchor) {
-            if (folder_popover != null) {
-                folder_popover.popdown();
-                folder_popover = null;
-            }
+        // Close the folder popover; true if one was open
+        private bool close_popover() {
+            if (folder_popover == null) return false;
+            folder_popover.popdown();
+            folder_popover = null;
+            return true;
+        }
 
-            folder_popover = new Gtk.Popover(anchor);
-            folder_popover.set_position(Gtk.PositionType.TOP);
-            folder_popover.get_style_context().add_class("folder-popover");
+        // A popover over `anchor` showing `title` above a grid of apps. A long list scrolls
+        // instead of growing past the screen.
+        private void show_popover(Gtk.Widget anchor, string title, Gtk.Grid grid, bool scrolls) {
+            close_popover();
+
+            var popover = new Gtk.Popover(anchor);
+            folder_popover = popover;
+            popover.set_position(Gtk.PositionType.TOP);
+            popover.get_style_context().add_class("folder-popover");
 
             var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
             vbox.margin = 15;
 
-            var name_label = new Gtk.Label(config.get_folder_name(folder_id));
+            var name_label = new Gtk.Label(title);
             name_label.halign = Gtk.Align.CENTER;
             name_label.get_style_context().add_class("folder-title");
             vbox.pack_start(name_label, false, false, 0);
 
-            var grid = new Gtk.Grid();
             grid.row_spacing = 10;
             grid.column_spacing = 10;
             grid.halign = Gtk.Align.CENTER;
-
-            var apps = config.get_folder_apps(folder_id);
-            int i = 0;
-            foreach (var app_id in apps) {
-                var app = app_manager.get_app(app_id);
-                if (app != null) {
-                    var item = create_folder_app_item(app, folder_id);
-                    grid.attach(item, i % 4, i / 4, 1, 1);
-                    i++;
-                }
+            if (scrolls) {
+                var scroll = new Gtk.ScrolledWindow(null, null);
+                scroll.hscrollbar_policy = Gtk.PolicyType.NEVER;
+                scroll.propagate_natural_height = true;
+                scroll.max_content_height = 480;
+                scroll.add(grid);
+                vbox.pack_start(scroll, true, true, 0);
+            } else {
+                vbox.pack_start(grid, true, true, 0);
             }
-            vbox.pack_start(grid, true, true, 0);
 
-            folder_popover.add(vbox);
-            folder_popover.show_all();
-
-            folder_popover.closed.connect(() => {
-                folder_popover = null;
+            popover.add(vbox);
+            popover.show_all();
+            popover.closed.connect(() => {
+                if (folder_popover == popover) folder_popover = null;
             });
         }
 
+        private void open_folder(string folder_id, Gtk.Widget anchor) {
+            var grid = new Gtk.Grid();
+            int i = 0;
+            foreach (var app_id in config.get_folder_apps(folder_id)) {
+                var app = app_manager.get_app(app_id);
+                if (app == null) continue;
+                grid.attach(create_folder_app_item(app, folder_id), i % 4, i / 4, 1, 1);
+                i++;
+            }
+            show_popover(anchor, config.get_folder_name(folder_id), grid, false);
+        }
+
+        private void remove_app_from_folder(string folder_id, string app_id) {
+            config.remove_app_from_folder(folder_id, app_id);
+            if (config.get_folder_apps(folder_id).length <= 1) {
+                config.delete_folder(folder_id);
+            }
+            close_popover();
+            on_search_changed();
+        }
+
         private Gtk.Widget create_folder_app_item(AppInfo app, string folder_id) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
+            var btn = make_tile(icon_image(app.icon, 48), app.name, false, 8);
+            btn.clicked.connect(() => launch_app(app));
 
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
-
-            var icon = new Gtk.Image();
-            var pixbuf = load_cached_icon(app.icon, 48);
-            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
-
-            var label = new Gtk.Label(app.name);
-            label.max_width_chars = 8;
-            label.ellipsize = Pango.EllipsizeMode.END;
-            label.get_style_context().add_class("app-name");
-
-            box.pack_start(icon, false, false, 0);
-            box.pack_start(label, false, false, 0);
-            btn.add(box);
-
-            btn.clicked.connect(() => {
-                usage_tracker.record_launch(app.id);
-                app.launch();
-                if (folder_popover != null) folder_popover.popdown();
-                folder_popover = null;
-                fade_hide();
-            });
-
+            // Dragging an app out of the folder takes it out
             Gtk.drag_source_set(btn, Gdk.ModifierType.BUTTON1_MASK, {}, Gdk.DragAction.MOVE);
             Gtk.drag_source_add_text_targets(btn);
             btn.drag_data_get.connect((ctx, data, info, time) => {
                 data.set_text("folder_app:" + folder_id + ":" + app.id, -1);
             });
-            btn.drag_end.connect((ctx) => {
-                config.remove_app_from_folder(folder_id, app.id);
-                if (config.get_folder_apps(folder_id).length <= 1) {
-                    config.delete_folder(folder_id);
-                }
-                if (folder_popover != null) folder_popover.popdown();
-                folder_popover = null;
-                on_search_changed();
-            });
+            btn.drag_end.connect((ctx) => remove_app_from_folder(folder_id, app.id));
 
-            btn.button_press_event.connect((event) => {
-                if (event.button == 3) {
-                    var menu = new Gtk.Menu();
-                    var remove = new Gtk.MenuItem.with_label("Remove from Folder");
-                    remove.activate.connect(() => {
-                        config.remove_app_from_folder(folder_id, app.id);
-                        if (config.get_folder_apps(folder_id).length <= 1) {
-                            config.delete_folder(folder_id);
-                        }
-                        if (folder_popover != null) folder_popover.popdown();
-                        folder_popover = null;
-                        on_search_changed();
-                    });
-                    menu.append(remove);
-                    menu.show_all();
-                    menu.popup_at_pointer(event);
-                    return true;
-                }
-                return false;
+            connect_context_menu(btn, (event) => {
+                var menu = new Gtk.Menu();
+                MenuUtil.add_item(menu, "Remove from Folder", () => remove_app_from_folder(folder_id, app.id));
+                MenuUtil.popup(menu, event);
             });
-
             return btn;
         }
 
@@ -1172,196 +1122,46 @@ namespace Dokku {
 
         // A folder-looking tile that holds a computed set of apps (not stored in the config)
         private Gtk.Widget create_group_item(string title, GenericArray<weak AppInfo> apps) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
-            btn.get_style_context().add_class("app-item");
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-
-            var icon_box = new Gtk.Grid();
-            icon_box.row_spacing = 1;
-            icon_box.column_spacing = 1;
-            icon_box.halign = Gtk.Align.CENTER;
-            icon_box.valign = Gtk.Align.CENTER;
-
-            int mini_icon = icon_size / 4;
-            for (int i = 0; i < apps.length && i < 9; i++) {
-                var icon = new Gtk.Image();
-                var pixbuf = load_cached_icon(apps[i].icon, mini_icon);
-                if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-                else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.LARGE_TOOLBAR);
-                icon_box.attach(icon, i % 3, i / 3, 1, 1);
-            }
-
-            var folder_frame = new Gtk.EventBox();
-            folder_frame.get_style_context().add_class("folder-icon");
-            folder_frame.set_size_request(icon_size, icon_size);
-            folder_frame.add(icon_box);
-
-            var label = new Gtk.Label(title);
-            label.get_style_context().add_class("app-name");
-            label.max_width_chars = 12;
-            label.ellipsize = Pango.EllipsizeMode.END;
-
-            box.pack_start(folder_frame, false, false, 0);
-            box.pack_start(label, false, false, 0);
-            btn.add(box);
-            btn.set_size_request(item_size, item_size);
-
+            var icons = new GenericArray<string>();
+            for (int i = 0; i < apps.length; i++) icons.add(apps[i].icon);
+            var btn = make_tile(make_folder_icon(icons), title, true);
             btn.clicked.connect(() => open_group(title, apps, btn));
             return btn;
         }
 
         private void open_group(string title, GenericArray<weak AppInfo> apps, Gtk.Widget anchor) {
-            if (folder_popover != null) {
-                folder_popover.popdown();
-                folder_popover = null;
-            }
-
-            folder_popover = new Gtk.Popover(anchor);
-            folder_popover.set_position(Gtk.PositionType.TOP);
-            folder_popover.get_style_context().add_class("folder-popover");
-
-            var vbox = new Gtk.Box(Gtk.Orientation.VERTICAL, 10);
-            vbox.margin = 15;
-
-            var name_label = new Gtk.Label(title);
-            name_label.halign = Gtk.Align.CENTER;
-            name_label.get_style_context().add_class("folder-title");
-            vbox.pack_start(name_label, false, false, 0);
-
             var grid = new Gtk.Grid();
-            grid.row_spacing = 10;
-            grid.column_spacing = 10;
-            grid.halign = Gtk.Align.CENTER;
             for (int i = 0; i < apps.length; i++) {
                 grid.attach(create_group_app_item(apps[i]), i % 4, i / 4, 1, 1);
             }
-
-            // A big group scrolls instead of growing past the screen
-            var scroll = new Gtk.ScrolledWindow(null, null);
-            scroll.hscrollbar_policy = Gtk.PolicyType.NEVER;
-            scroll.propagate_natural_height = true;
-            scroll.max_content_height = 480;
-            scroll.add(grid);
-            vbox.pack_start(scroll, true, true, 0);
-
-            folder_popover.add(vbox);
-            folder_popover.show_all();
-            folder_popover.closed.connect(() => {
-                folder_popover = null;
-            });
+            show_popover(anchor, title, grid, true);
         }
 
         private Gtk.Widget create_group_app_item(AppInfo app) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 4);
-
-            var icon = new Gtk.Image();
-            var pixbuf = load_cached_icon(app.icon, 48);
-            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-            else icon.set_from_icon_name("application-x-executable", Gtk.IconSize.DIALOG);
-
-            var label = new Gtk.Label(app.name);
-            label.max_width_chars = 12;
-            label.ellipsize = Pango.EllipsizeMode.END;
-            label.get_style_context().add_class("app-name");
-
-            box.pack_start(icon, false, false, 0);
-            box.pack_start(label, false, false, 0);
-            btn.add(box);
-
-            btn.clicked.connect(() => {
-                usage_tracker.record_launch(app.id);
-                app.launch();
-                if (folder_popover != null) folder_popover.popdown();
-                folder_popover = null;
-                fade_hide();
-            });
-            btn.button_press_event.connect((event) => {
-                if (event.button == 3) {
-                    show_app_menu(app, btn, event);
-                    return true;
-                }
-                return false;
-            });
-            btn.popup_menu.connect(() => {
-                show_app_menu(app, btn, null);
-                return true;
-            });
+            var btn = make_tile(icon_image(app.icon, 48), app.name, false);
+            btn.clicked.connect(() => launch_app(app));
+            connect_context_menu(btn, (event) => show_app_menu(app, btn, event), true);
             return btn;
         }
 
         private Gtk.Widget create_shortcut_item(string shortcut_id) {
-            var btn = new Gtk.Button();
-            btn.relief = Gtk.ReliefStyle.NONE;
-            btn.get_style_context().add_class("app-item");
-
-            var box = new Gtk.Box(Gtk.Orientation.VERTICAL, 8);
-
             string icon_name = config.get_shortcut_icon(shortcut_id);
             if (icon_name == "") icon_name = "utilities-terminal";
 
-            var icon = new Gtk.Image();
-            var pixbuf = load_cached_icon(icon_name, icon_size);
-            if (pixbuf != null) icon.set_from_pixbuf(pixbuf);
-            else icon.set_from_icon_name(icon_name, Gtk.IconSize.DIALOG);
-
-            var label = new Gtk.Label(config.get_shortcut_name(shortcut_id));
-            label.get_style_context().add_class("app-name");
-            label.max_width_chars = 12;
-            label.ellipsize = Pango.EllipsizeMode.END;
-
-            box.pack_start(icon, false, false, 0);
-            box.pack_start(label, false, false, 0);
-
-            btn.add(box);
-            btn.set_size_request(item_size, item_size);
-
-            btn.clicked.connect(() => {
-                string cmd = config.get_shortcut_command(shortcut_id);
-                try {
-                    string[] argv;
-                    Shell.parse_argv(cmd, out argv);
-                    Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
-                } catch (Error e) {
-                    warning("Failed to launch shortcut: %s", e.message);
-                }
-                usage_tracker.record_launch("shortcut:" + shortcut_id);
-                fade_hide();
-            });
-
-            btn.button_press_event.connect((event) => {
-                if (event.button == 3) {
-                    show_shortcut_menu(shortcut_id, event);
-                    return true;
-                }
-                return false;
-            });
-
+            var btn = make_tile(icon_image(icon_name, icon_size), config.get_shortcut_name(shortcut_id), true);
+            btn.clicked.connect(() => run_shortcut(shortcut_id));
+            connect_context_menu(btn, (event) => show_shortcut_menu(shortcut_id, event));
             return btn;
         }
 
-        private void show_shortcut_menu(string shortcut_id, Gdk.EventButton event) {
+        private void show_shortcut_menu(string shortcut_id, Gdk.EventButton? event) {
             var menu = new Gtk.Menu();
-
-            var edit_item = new Gtk.MenuItem.with_label("Edit Shortcut");
-            edit_item.activate.connect(() => {
-                show_shortcut_dialog(shortcut_id);
-            });
-            menu.append(edit_item);
-
-            var delete_item = new Gtk.MenuItem.with_label("Delete Shortcut");
-            delete_item.activate.connect(() => {
+            MenuUtil.add_item(menu, "Edit Shortcut", () => show_shortcut_dialog(shortcut_id));
+            MenuUtil.add_item(menu, "Delete Shortcut", () => {
                 config.delete_shortcut(shortcut_id);
                 on_search_changed();
             });
-            menu.append(delete_item);
-
-            menu.show_all();
-            menu.popup_at_pointer(event);
+            MenuUtil.popup(menu, event);
         }
 
         private void show_shortcut_dialog(string? shortcut_id) {
@@ -1378,111 +1178,17 @@ namespace Dokku {
             content.spacing = 8;
             content.margin = 16;
 
-            var name_label = new Gtk.Label("Name:");
-            name_label.halign = Gtk.Align.START;
-            content.add(name_label);
-
-            var name_entry = new Gtk.Entry();
-            name_entry.placeholder_text = "My Script";
+            var name_entry = add_labelled_entry(content, "Name:", "My Script");
             if (is_edit) name_entry.text = config.get_shortcut_name(shortcut_id);
-            content.add(name_entry);
-
-            var cmd_label = new Gtk.Label("Command:");
-            cmd_label.halign = Gtk.Align.START;
-            content.add(cmd_label);
-
-            var cmd_entry = new Gtk.Entry();
-            cmd_entry.placeholder_text = "/path/to/script.sh";
+            var cmd_entry = add_labelled_entry(content, "Command:", "/path/to/script.sh");
             if (is_edit) cmd_entry.text = config.get_shortcut_command(shortcut_id);
-            content.add(cmd_entry);
 
             var icon_label = new Gtk.Label("Icon (optional):");
             icon_label.halign = Gtk.Align.START;
             content.add(icon_label);
-
-            var icon_box = new Gtk.Box(Gtk.Orientation.HORIZONTAL, 8);
-
-            var icon_entry = new Gtk.Entry();
-            icon_entry.placeholder_text = "utilities-terminal";
-            icon_entry.hexpand = true;
-            icon_entry.activates_default = true;
-            if (is_edit) {
-                string ic = config.get_shortcut_icon(shortcut_id);
-                if (ic != "") icon_entry.text = ic;
-            }
-            icon_box.pack_start(icon_entry, true, true, 0);
-
-            var browse_btn = new Gtk.Button.from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON);
-            browse_btn.tooltip_text = "Browse for icon";
-            icon_box.pack_start(browse_btn, false, false, 0);
-
-            var icon_preview = new Gtk.Image.from_icon_name("utilities-terminal", Gtk.IconSize.LARGE_TOOLBAR);
-            icon_box.pack_start(icon_preview, false, false, 0);
-
-            // Live preview: update as user types (handles paths and theme names)
-            icon_entry.changed.connect(() => {
-                string text = icon_entry.text.strip();
-                if (text == "") {
-                    icon_preview.set_from_icon_name("utilities-terminal", Gtk.IconSize.LARGE_TOOLBAR);
-                    return;
-                }
-                if (text.has_prefix("/") && FileUtils.test(text, FileTest.EXISTS)) {
-                    try {
-                        var pixbuf = new Gdk.Pixbuf.from_file_at_size(text, 24, 24);
-                        icon_preview.set_from_pixbuf(pixbuf);
-                    } catch (Error e) {
-                        icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
-                    }
-                } else {
-                    icon_preview.set_from_icon_name(text, Gtk.IconSize.LARGE_TOOLBAR);
-                }
-            });
-
-            // Browse for icon file
-            browse_btn.clicked.connect(() => {
-                var chooser = new Gtk.FileChooserDialog("Choose Icon", dialog,
-                    Gtk.FileChooserAction.OPEN,
-                    "_Cancel", Gtk.ResponseType.CANCEL,
-                    "_Open", Gtk.ResponseType.ACCEPT);
-
-                var filter = new Gtk.FileFilter();
-                filter.set_filter_name("Image files");
-                filter.add_pattern("*.png");
-                filter.add_pattern("*.svg");
-                filter.add_pattern("*.xpm");
-                filter.add_pattern("*.ico");
-                chooser.add_filter(filter);
-
-                var all_filter = new Gtk.FileFilter();
-                all_filter.set_filter_name("All files");
-                all_filter.add_pattern("*");
-                chooser.add_filter(all_filter);
-
-                chooser.set_current_folder("/usr/share/icons");
-
-                var preview_img = new Gtk.Image();
-                preview_img.set_size_request(64, 64);
-                chooser.set_preview_widget(preview_img);
-                chooser.update_preview.connect(() => {
-                    string? path = chooser.get_preview_filename();
-                    if (path != null) {
-                        try {
-                            var pixbuf = new Gdk.Pixbuf.from_file_at_size(path, 64, 64);
-                            preview_img.set_from_pixbuf(pixbuf);
-                            chooser.set_preview_widget_active(true);
-                        } catch (Error e) {
-                            chooser.set_preview_widget_active(false);
-                        }
-                    }
-                });
-
-                if (chooser.run() == Gtk.ResponseType.ACCEPT) {
-                    icon_entry.text = chooser.get_filename();
-                }
-                chooser.destroy();
-            });
-
-            content.add(icon_box);
+            var picker = new IconPicker(dialog, "utilities-terminal",
+                is_edit ? config.get_shortcut_icon(shortcut_id) : "", "utilities-terminal");
+            content.add(picker);
 
             dialog.show_all();
 
@@ -1491,9 +1197,7 @@ namespace Dokku {
                     string name = name_entry.text.strip();
                     string cmd = cmd_entry.text.strip();
                     if (name != "" && cmd != "") {
-                        string icon_name = icon_entry.text.strip();
-                        if (icon_name == "") icon_name = "utilities-terminal";
-
+                        string icon_name = picker.text == "" ? "utilities-terminal" : picker.text;
                         if (is_edit) {
                             config.update_shortcut(shortcut_id, name, cmd, icon_name);
                         } else {
@@ -1505,6 +1209,16 @@ namespace Dokku {
                 }
                 dialog.destroy();
             });
+        }
+
+        private static Gtk.Entry add_labelled_entry(Gtk.Container content, string label_text, string placeholder) {
+            var label = new Gtk.Label(label_text);
+            label.halign = Gtk.Align.START;
+            content.add(label);
+            var entry = new Gtk.Entry();
+            entry.placeholder_text = placeholder;
+            content.add(entry);
+            return entry;
         }
 
         private void show_folder_preview(Gtk.Widget btn) {
@@ -1633,17 +1347,12 @@ namespace Dokku {
             bool entry_has_text = search_entry.has_focus && search_entry.text != "";
 
             if (event.keyval == Gdk.Key.Escape) {
-                if (folder_popover != null) {
-                    folder_popover.popdown();
-                    folder_popover = null;
-                    return true;
-                }
-                fade_hide();
+                if (!close_popover()) fade_hide();
                 return true;
             }
             if (event.keyval == Gdk.Key.Return || event.keyval == Gdk.Key.KP_Enter) {
                 // Nothing in the grid matches, but a calculation, file or web search does
-                if (!on_item && search_entry.text != "" && ordered_items.length() == 0) {
+                if (!on_item && search_entry.text != "" && ordered_items.length == 0) {
                     var rows = quick_box.get_children();
                     if (rows != null) {
                         ((Gtk.Button) rows.data).clicked();
@@ -1651,25 +1360,16 @@ namespace Dokku {
                     }
                 }
                 // With an icon focused, Enter activates that icon instead
-                if (!on_item && search_entry.text != "" && ordered_items.length() > 0) {
-                    string first = ordered_items.nth_data(0);
-                    if (first.has_prefix("app:")) {
-                        var app = app_manager.get_app(first.substring(4));
-                        if (app != null) {
-                            usage_tracker.record_launch(app.id);
-                            app.launch();
-                        }
+                if (!on_item && search_entry.text != "" && ordered_items.length > 0) {
+                    string first = ordered_items[0];
+                    var app = first.has_prefix("app:") ? app_manager.get_app(first.substring(4)) : null;
+                    if (app != null) {
+                        launch_app(app);
                     } else if (first.has_prefix("shortcut:")) {
-                        string sid = first.substring(9);
-                        string cmd = config.get_shortcut_command(sid);
-                        try {
-                            string[] argv;
-                            Shell.parse_argv(cmd, out argv);
-                            Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
-                        } catch (Error e) {}
-                        usage_tracker.record_launch("shortcut:" + sid);
+                        run_shortcut(first.substring(9));
+                    } else {
+                        fade_hide();
                     }
-                    fade_hide();
                     return true;
                 }
             }
@@ -1725,12 +1425,7 @@ namespace Dokku {
         }
 
         private bool on_bg_click(Gdk.EventButton event) {
-            if (folder_popover != null) {
-                folder_popover.popdown();
-                folder_popover = null;
-                return true;
-            }
-            fade_hide();
+            if (!close_popover()) fade_hide();
             return true;
         }
 
@@ -1816,7 +1511,7 @@ namespace Dokku {
             mark_dirty();
         }
 
-        // Pre-build pages in an idle callback so they're ready before the user opens
+        // Rebuild the page in an idle callback instead of at once
         private void schedule_rebuild() {
             if (rebuild_idle_id != 0) return;
             rebuild_idle_id = Idle.add(() => {
@@ -1825,19 +1520,8 @@ namespace Dokku {
                     search_entry.text = "";
                     on_search_changed();
                 }
-                prewarm();
                 return false;
             });
-        }
-
-        // Show the children and realize the window without mapping it, so the
-        // first real open skips most of the one-time widget setup
-        private void prewarm() {
-            if (has_shown_once || visible) return;
-            var child = get_child();
-            if (child != null) child.show_all();
-            realize();
-            has_shown_once = true;
         }
 
         // Ease-out cubic: fast start, smooth deceleration
@@ -1915,6 +1599,7 @@ namespace Dokku {
             if (!fade_enabled) {
                 set_fade_level(1.0);
                 hide();
+                trim_pages();
                 return;
             }
             fading_out = true;
@@ -1931,6 +1616,7 @@ namespace Dokku {
                     // fading on) would otherwise fade a full-opacity ghost out
                     // a second time. fade_show sets the opacity before mapping.
                     hide();
+                    trim_pages();
                     return false;
                 }
                 return true;
