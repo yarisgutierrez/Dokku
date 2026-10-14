@@ -23,7 +23,7 @@ jobs:
 
       - name: Build
         run: |
-          meson setup build --buildtype=release
+          meson setup build --buildtype=minsize
           ninja -C build
 
       - name: The binary starts

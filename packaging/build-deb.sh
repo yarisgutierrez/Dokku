@@ -18,7 +18,7 @@ ARCH=$(dpkg --print-architecture)
 PKG="dokku_${VERSION}_${ARCH}"
 
 rm -rf "$WORK"
-meson setup "$WORK/build" "$ROOT" --prefix=/usr --sysconfdir=/etc --buildtype=release >/dev/null
+meson setup "$WORK/build" "$ROOT" --prefix=/usr --sysconfdir=/etc --buildtype=minsize >/dev/null
 ninja -C "$WORK/build" >/dev/null
 DESTDIR="$WORK/root" meson install -C "$WORK/build" --no-rebuild --strip >/dev/null
 
