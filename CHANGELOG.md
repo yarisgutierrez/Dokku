@@ -6,6 +6,35 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Lower idle memory.** The launcher and Settings windows are now built the first time they
+  are opened, not at startup, and the launcher fills its pages only while it is on screen.
+  An idle dock uses about 8 MB (PSS) instead of 13 MB in a release build. The first launcher
+  open takes about 95 ms to its first frame instead of 41 ms; later opens are unchanged.
+- **One set of shared services.** The plugin manager, theme manager, progress monitor and
+  notification monitor are created once and shared by every dock and by Settings, so extra
+  docks no longer repeat the D-Bus watchers and plugin timers. The accessibility bus is
+  connected only when a progress window first appears.
+- **Smaller build.** `meson setup` now defaults to `buildtype=minsize` (`-Os`) with stripped
+  binaries, which measured the same speed as `-O2` and a 19% smaller binary. The `.deb` build
+  and CI use it too.
+- **Less duplicated code.** The dock, launcher, settings, popups and config code share their
+  helpers (tile and popover builders, row helpers, typed config readers, one icon picker,
+  one spawn helper). About 1,100 fewer lines of Vala, with no change to how anything looks.
+
+### Fixed
+- A plugin or theme installed in Settings now reaches the dock at once; before, it appeared
+  only after a restart.
+- A separator is now the same width for clicks and tooltips as it is drawn (they differed by
+  4 px).
+- The icon preview in Properties shows icons given as a file path.
+- Without an XDG applications menu, the launcher can group apps by category again (only
+  Accessories and Other were decided correctly).
+
+### Removed
+- `DOKKU_TIMING=1` and the launcher timing log, added in 0.3.0 to chase the cold-click lag
+  that is now fixed.
+
 ## [0.3.0] - 2026-10-13
 
 ### Added
