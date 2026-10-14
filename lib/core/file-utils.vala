@@ -1,5 +1,18 @@
 namespace Dokku {
     public class FileUtil {
+        // Run a command line (no shell involved) and leave it to run on its own
+        public static bool run_detached(string command_line) {
+            try {
+                string[] argv;
+                Shell.parse_argv(command_line, out argv);
+                Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
+                return true;
+            } catch (Error e) {
+                warning("Failed to run %s: %s", command_line, e.message);
+                return false;
+            }
+        }
+
         // Extract a zip to dest_dir/<basename>, validate paths, return dest path.
         // Returns false and cleans up on failure.
         public static bool install_zip(string zip_path, string dest_dir, out string dest_path) {

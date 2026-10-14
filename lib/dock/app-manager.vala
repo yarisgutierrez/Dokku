@@ -248,13 +248,7 @@ namespace Dokku {
             }
 
             // No usable .desktop file: run the Exec line directly
-            try {
-                string[] argv;
-                Shell.parse_argv(exec, out argv);
-                Process.spawn_async(null, argv, null, SpawnFlags.SEARCH_PATH, null, null);
-            } catch (Error e) {
-                warning("Failed to launch %s: %s", name, e.message);
-            }
+            FileUtil.run_detached(exec);
         }
     }
 
