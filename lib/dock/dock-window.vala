@@ -60,7 +60,7 @@ namespace Dokku {
         private const double REMOVE_THRESHOLD = 50.0;
         private DragFloatPopup drag_float = new DragFloatPopup();
 
-        private ProgressMonitor? progress_monitor;
+        private ProgressMonitor progress_monitor;
         private uint progress_tick_id = 0;
         private UsageTracker usage_tracker;
 
@@ -94,7 +94,9 @@ namespace Dokku {
             { "text/uri-list", 0, 0 }
         };
 
-        public DockWindow(Gtk.Application app, AppManager app_manager, ConfigManager config, UsageTracker usage_tracker) {
+        public DockWindow(Gtk.Application app, AppManager app_manager, ConfigManager config,
+                          UsageTracker usage_tracker, PluginManager plugin_manager,
+                          ThemeManager theme_manager, ProgressMonitor progress_monitor) {
             Object(application: app);
 
             use_layer_shell = GtkLayerShell.is_supported();
@@ -118,8 +120,8 @@ namespace Dokku {
             properties_dialog.changed.connect(schedule_redraw);
             renderer.app_manager = app_manager;
             this.config = config;
-            plugin_manager = new PluginManager(config);
-            theme_manager = new ThemeManager();
+            this.plugin_manager = plugin_manager;
+            this.theme_manager = theme_manager;
             items = new List<DockItem>();
             bounce_cooldowns = new HashTable<string, int64?>(str_hash, str_equal);
 
@@ -209,12 +211,7 @@ namespace Dokku {
             });
             wm.attention_requested.connect(on_attention_requested);
 
-            if (config.get_notification_badges()) {
-                notification_monitor = new NotificationMonitor(app_manager);
-                notification_monitor.notification_received.connect(on_notification);
-            }
-
-            progress_monitor = new ProgressMonitor(app_manager);
+            this.progress_monitor = progress_monitor;
             progress_monitor.progress_changed.connect(on_progress_changed);
 
             draw.connect(on_draw);
@@ -238,6 +235,10 @@ namespace Dokku {
                 // Timeouts
                 if (dodge_check_timeout_id != 0) { Source.remove(dodge_check_timeout_id); dodge_check_timeout_id = 0; }
                 cancel_hide_timers();
+
+                // The monitors outlive this dock
+                progress_monitor.progress_changed.disconnect(on_progress_changed);
+                set_notification_monitor(null);
 
                 // Tick callbacks are auto-removed on widget destroy, but null IDs
                 slide_tick_id = 0;
@@ -2083,6 +2084,19 @@ namespace Dokku {
             }
         }
 
+        // The badge counter is shared by every dock; null when badges are off
+        public void set_notification_monitor(NotificationMonitor? monitor) {
+            if (monitor == notification_monitor) return;
+            if (notification_monitor != null) {
+                notification_monitor.notification_received.disconnect(on_notification);
+            }
+            notification_monitor = monitor;
+            if (monitor == null) return;
+            monitor.notification_received.connect(on_notification);
+            foreach (var item in items) item.notification_count = monitor.get_count(item.id);
+            schedule_redraw();
+        }
+
         private void on_notification(string app_id) {
             if (notification_monitor == null) return;
             var item = find_item(app_id);
@@ -2140,16 +2154,6 @@ namespace Dokku {
             items.append(launcher_item);
             load_pinned_apps();
             load_plugins();
-
-            // Re-create or destroy notification monitor based on setting
-            if (config.get_notification_badges()) {
-                if (notification_monitor == null) {
-                    notification_monitor = new NotificationMonitor(app_manager);
-                    notification_monitor.notification_received.connect(on_notification);
-                }
-            } else {
-                notification_monitor = null;
-            }
 
             // If dodge_windows was disabled, clear dodge state
             if (!dodge_windows && dodge_hiding) {

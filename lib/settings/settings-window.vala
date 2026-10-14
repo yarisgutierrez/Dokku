@@ -16,7 +16,8 @@ namespace Dokku {
         private Gtk.Entry[] app_entries;
         private HotkeyCaptureButton[] app_hotkey_buttons;
 
-        public SettingsWindow(ConfigManager config, AppManager app_manager) {
+        public SettingsWindow(ConfigManager config, AppManager app_manager,
+                              PluginManager plugin_manager, ThemeManager theme_manager) {
             Object(
                 title: "Dokku Settings",
                 default_width: 500,
@@ -25,8 +26,8 @@ namespace Dokku {
             );
             this.config = config;
             this.app_manager = app_manager;
-            this.theme_manager = new ThemeManager();
-            this.plugin_manager = new PluginManager(config);
+            this.theme_manager = theme_manager;
+            this.plugin_manager = plugin_manager;
             apply_css();
             build_ui();
 

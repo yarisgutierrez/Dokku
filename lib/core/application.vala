@@ -10,6 +10,13 @@ namespace Dokku {
         private ConfigManager config;
         private HotkeyManager hotkey_manager;
         private UsageTracker usage_tracker;
+        // One of each for the whole application: every plugin watches D-Bus or runs a
+        // timer, so a second copy would do all of that twice
+        private PluginManager plugin_manager;
+        private ThemeManager theme_manager;
+        private ProgressMonitor progress_monitor;
+        // Counts unread notifications for every dock; null while badges are switched off
+        private NotificationMonitor? notification_monitor = null;
         private DBusService? dbus_service;
         private uint dbus_owner_id = 0;
         private uint monitor_sync_id = 0;
@@ -83,8 +90,13 @@ namespace Dokku {
             config = new ConfigManager();
             app_manager = new AppManager();
             usage_tracker = new UsageTracker(config);
+            plugin_manager = new PluginManager(config);
+            theme_manager = new ThemeManager();
+            progress_monitor = new ProgressMonitor(app_manager);
             extra_docks = new List<DockWindow>();
-            dock = new DockWindow(this, app_manager, config, usage_tracker);
+            dock = new DockWindow(this, app_manager, config, usage_tracker, plugin_manager,
+                                  theme_manager, progress_monitor);
+            sync_notification_monitor();
 
             dock.launcher_requested.connect(() => get_launcher().toggle());
             dock.settings_requested.connect(() => get_settings().show_all());
@@ -169,7 +181,7 @@ namespace Dokku {
 
         private SettingsWindow get_settings() {
             if (settings == null) {
-                settings = new SettingsWindow(config, app_manager);
+                settings = new SettingsWindow(config, app_manager, plugin_manager, theme_manager);
                 settings.settings_changed.connect(() => {
                     apply_settings();
                     dbus_service.settings_changed();
@@ -205,6 +217,7 @@ namespace Dokku {
         // Settings changed, from the Settings window or a Reload over D-Bus: every dock
         // (one per monitor), the launcher and the hotkeys take the new values
         private void apply_settings() {
+            sync_notification_monitor();
             dock.reload_settings();
             foreach (var extra in extra_docks) {
                 extra.reload_settings();
@@ -214,6 +227,19 @@ namespace Dokku {
             if (hotkey_manager != null) {
                 hotkey_manager.reload_hotkeys();
             }
+        }
+
+        // Start or stop watching notifications to match the setting, and hand the result to
+        // every dock
+        private void sync_notification_monitor() {
+            bool wanted = config.get_notification_badges();
+            if (wanted && notification_monitor == null) {
+                notification_monitor = new NotificationMonitor(app_manager);
+            } else if (!wanted) {
+                notification_monitor = null;
+            }
+            dock.set_notification_monitor(notification_monitor);
+            foreach (var extra in extra_docks) extra.set_notification_monitor(notification_monitor);
         }
 
         private void sync_multi_monitor() {
@@ -273,7 +299,9 @@ namespace Dokku {
                     }
                 }
                 if (!already_has) {
-                    var extra = new DockWindow(this, app_manager, config, usage_tracker);
+                    var extra = new DockWindow(this, app_manager, config, usage_tracker,
+                                               plugin_manager, theme_manager, progress_monitor);
+                    extra.set_notification_monitor(notification_monitor);
                     extra.set_target_monitor(mon);
                     extra.launcher_requested.connect(() => get_launcher().toggle());
                     extra.settings_requested.connect(() => get_settings().show_all());
