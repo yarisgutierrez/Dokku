@@ -11,6 +11,7 @@ namespace Dokku {
 
         // AT-SPI progress polling (optional dependency)
 #if HAVE_ATSPI
+        private bool atspi_tried = false;
         private bool atspi_available = false;
         private uint atspi_poll_id = 0;
 #endif
@@ -24,11 +25,6 @@ namespace Dokku {
             progress_windows = new HashTable<unowned Wnck.Window, string>(direct_hash, direct_equal);
             name_handlers = new HashTable<unowned Wnck.Window, ulong>(direct_hash, direct_equal);
             launcher_entry_apps = new HashTable<string, bool>(str_hash, str_equal);
-
-#if HAVE_ATSPI
-            int atspi_status = Atspi.init();
-            atspi_available = (atspi_status == 0);
-#endif
 
             setup_monitor.begin();
             setup_window_monitor();
@@ -243,6 +239,12 @@ namespace Dokku {
 
 #if HAVE_ATSPI
         private void start_atspi_polling() {
+            // Connecting to the accessibility bus costs memory, so only do it once a
+            // progress window actually shows up
+            if (!atspi_tried) {
+                atspi_tried = true;
+                atspi_available = (Atspi.init() == 0);
+            }
             if (!atspi_available) return;
             if (atspi_poll_id != 0) return;
             atspi_poll_id = Timeout.add(1000, () => {
