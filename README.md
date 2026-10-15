@@ -1,53 +1,83 @@
-# Dokku
+<h1 align="center">
+  <img src="screenshots/dokku-icon.png" alt="Dokku icon" width="128">
+  <br>Dokku
+</h1>
 
-A macOS/GNOME-style dock and full-screen app launcher for XFCE4, running on both X11 and
-Wayland. Written in Vala (GTK3, Cairo).
+<p align="center">
+  A fast, feature-rich dock built for Linux.
+  <br>
+  <a href="#about">About</a>
+  ·
+  <a href="#install">Install</a>
+  ·
+  <a href="#documentation">Documentation</a>
+  ·
+  <a href="#contributing">Contributing</a>
+</p>
 
-![Dokku, with the now-playing popup open](screenshots/media-popup.png)
+## About
+
+<p align="center">
+  <img src="screenshots/media-popup.png" alt="Dokku, with the now-playing popup open" width="640">
+</p>
+
+Dokku is a lightweight dock and full-screen app launcher for Linux. Some docks do the bare minimum, and
+others only work as part of one desktop environment. Dokku is a single app that has what you'd
+expect from a modern dock: icon magnification, running-app indicators, folders, a now-playing
+widget and a launcher with search. 
 
 ## Features
 
-- **Dock** with magnification, running-app indicators, and Cairo-drawn themes
-- **Positioning** on any screen edge (bottom, top, left, right), with multi-monitor support
-  and separate settings for each monitor
-- **Visibility:** auto-hide, and "dodge windows" (hide when windows overlap; X11)
+- **Dock** with magnification, running-app indicators and Cairo-drawn themes
+- **Positioning** on any screen edge, with multi-monitor support and separate settings for each
+  monitor
+- **Visibility:** auto-hide, and "dodge windows" (hide when a window overlaps)
 - **Drag and drop:** reorder icons, or drag a pinned app off the dock to unpin it
 - **Folders:** group pinned apps into dock folders
-- **Window previews** on hover for apps with several windows (X11)
+- **Window previews** on hover for apps with several windows
 - **Notification badges, progress bars and launch/attention bounce**
 - **Recent files** in the right-click menu
-- **Mouse shortcuts:** middle-click opens a new window, scroll switches an app's windows,
-  clicking the focused app minimizes it, dropping a file on an icon opens it there, and dropping files on the Trash moves them to it
-- **Media widget** (MPRIS2) with album art; rest the pointer on it for a popup with the
-  artist, song, album, a seek bar and playback controls. Scroll on it for volume and
-  middle-click to play or pause. It follows the player that is playing, and Settings can
-  list players to ignore
-- **Frosted glass** blur via a compositor such as picom (X11)
-- **Launcher:** full-screen app grid with search and keyboard navigation; the search box also
-  calculates (`2+3*4`), finds recent files and can search the web
+- **Mouse shortcuts:** middle-click opens a new window, scrolling switches an app's windows,
+  clicking the focused app minimizes it, dropping a file on an icon opens it there, and
+  dropping files on the Trash moves them to it
+- **Media widget** (MPRIS2) with album art. Rest the pointer on it for a popup with the artist,
+  song, album, a seek bar and playback controls. Scroll on it for volume, middle-click to play
+  or pause. It follows whichever player is playing, and Settings can list players to ignore
+- **Frosted glass** blur via compositor
+- **Launcher:** full-screen app grid with search and keyboard navigation. The search box also
+  calculates, finds recent files and can search the web
 - **Backup:** export, import and reset your settings from the Settings window
-- **Plugins:** built-in Trash, Show Desktop and Separator; Clock, Battery and Volume widgets
-  that you switch on; plus your own scripts (see Plugins below)
-- **Global hotkeys** through keybinder (X11; on Wayland bind a key in your compositor)
+- **Plugins:** Trash, Show Desktop and Separator are built in. Clock, Battery and Volume
+  widgets are there too, off until you turn them on
+- **Global hotkeys** through keybinder
 
-## Screenshots
+## Install
 
-The dock, with magnification and the Clock, Battery and Volume widgets:
+### Requirements
 
-![The dock](screenshots/dock.png)
+Dokku needs a few things at runtime.
 
-The launcher, and its search box doing a calculation:
+- `gvfs-backends`: album art in the media widget. Spotify and some other players give an
+  `https://` art URL, and GIO fetches those through the GVfs HTTP daemon.
+- `libglib2.0-bin`: provides `gio`, which the Trash uses to move files to the trash.
+- On Wayland, a compositor that supports `wlr-layer-shell` (sway, labwc, Wayfire, Hyprland and
+  KDE Plasma do). GNOME's Mutter doesn't, so Dokku can't draw its dock there. This is a
+  compositor protocol, not a package.
 
-![The app launcher](screenshots/launcher.png)
+### Download
 
-![A calculation in the launcher search](screenshots/launcher-calc.png)
+On Debian, Ubuntu and derivatives, download the `.deb` from the
+[releases page](https://github.com/yarisgutierrez/Dokku/releases) and install it:
 
-(These were taken with demo launchers and a stand-in music player, so they show the layout and
-not anyone's real apps.)
+```sh
+sudo dpkg -i dokku_*.deb
+```
 
-## Build
+It pulls in the libraries it needs and starts Dokku at login.
 
-Dependencies (Debian/Ubuntu package names):
+### Building from source
+
+Install the build dependencies:
 
 ```sh
 sudo apt install valac meson ninja-build libgtk-3-dev libwnck-3-dev \
@@ -55,136 +85,30 @@ sudo apt install valac meson ninja-build libgtk-3-dev libwnck-3-dev \
 # optional: libatspi2.0-dev
 ```
 
-**Runtime:** `gvfs-backends` is needed for album art in the media widget. Players such as
-Spotify publish `https://` art URLs, and GIO fetches them through the GVfs HTTP daemon.
+Then build and install:
 
 ```sh
-meson setup build
-ninja -C build
-./build/src/dokku      # run without installing
+git clone https://github.com/yarisgutierrez/Dokku.git
+cd Dokku
+./install.sh
 ```
 
-## Install
-
-**Debian, Ubuntu and derivatives:** download the `.deb` from the
-[releases page](https://github.com/yarisgutierrez/Dokku/releases) and install it with
-`sudo apt install ./dokku_*.deb`. It starts at login and pulls in the libraries it needs. It is
-built on Ubuntu 24.04, so it needs a system at least as new as that (glibc 2.38; Debian 13 and
-Ubuntu 24.04 qualify). On an older system, build from source as below.
-
-**From source:**
+By default, this installs for your user under `~/.local/bin`. To install Dokku in another path:
 
 ```sh
-meson setup build --prefix=/usr
-ninja -C build
-sudo ninja -C build install
+./install.sh --global              # for everyone, in /usr/local (asks for sudo)
+./install.sh --prefix /opt/dokku   # any directory you like
 ```
 
-This installs the `dokku` binary, the desktop entry, the app icon, the man page
-and an autostart entry.
-
-**Choosing a prefix:** use `--prefix=/usr` if you want Dokku to start
-automatically at login. The autostart entry is installed under
-`<prefix>/etc/xdg/autostart`, and desktop environments read autostart entries
-from `/etc/xdg/autostart` (and the other `XDG_CONFIG_DIRS`). With the default prefix (`/usr/local`) the entry is
-installed where nothing looks for it. In that case copy it by hand instead:
+Once it's installed, open Dokku from your Applications menu, or run `dokku`. To try it without
+installing:
 
 ```sh
-mkdir -p ~/.config/autostart
-cp data/dokku-autostart.desktop ~/.config/autostart/
+meson setup build && ninja -C build
+./build/src/dokku
 ```
 
-You may need to refresh the icon cache to see the app icon in menus:
-
-```sh
-sudo gtk-update-icon-cache -f /usr/share/icons/hicolor
-```
-
-### Start, restart and autostart
-
-Dokku starts from your application menu, from `dokku` in a terminal, or at login
-if autostart is set up. It is a single-instance application: running `dokku`
-again while it's running only forwards the request to the running copy. To
-restart it, for example after reinstalling:
-
-```sh
-pkill dokku; dokku &
-```
-
-To turn autostart off for your user without uninstalling, copy the autostart
-file to `~/.config/autostart/` and change `Hidden=false` to `Hidden=true` in it.
-
-### Update
-
-Pull the new source, then rebuild and reinstall with the same commands. Your
-settings in `~/.config/dokku/` are kept.
-
-### Uninstall
-
-Meson has no uninstall target, but it records what it installed. From the build
-directory you installed from:
-
-```sh
-grep -v '^#' build/meson-logs/install-log.txt | while read -r f; do
-    [ -f "$f" ] && sudo rm -v "$f"
-done
-```
-
-Your settings, themes and plugins are left in place. Remove them too if you
-want a clean slate:
-
-```sh
-rm -r ~/.config/dokku ~/.local/share/dokku
-```
-
-## Files
-
-| Path | Purpose |
-|------|---------|
-| `~/.config/dokku/config.ini` | settings, pinned apps, folders, enabled plugins |
-| `~/.config/dokku/config.ini.bak` | what the last Import or Reset replaced |
-| `~/.local/share/dokku/themes/` | user-installed themes |
-| `~/.local/share/dokku/plugins/` | user script plugins |
-
-## X11 and Wayland
-
-Dokku detects the session when it starts; there is no setting to switch. Features
-that depend on X11-only libraries are turned off on Wayland, and the Settings
-window shows why next to each one.
-
-| Feature | X11 | Wayland |
-|---------|-----|---------|
-| Dock, magnification, folders, drag and drop, themes | yes | yes (layer-shell) |
-| Launcher, Settings | yes | yes |
-| Media widget, notification badges (both use D-Bus) | yes | yes (undergoing testing) |
-| Running-app indicators, window list, focus and close | yes | yes, if the compositor has `wlr-foreign-toplevel-management` |
-| Show Desktop button | yes | yes, if the compositor lets clients minimize windows (labwc does; sway does not) |
-| Dodge windows | when a window overlaps the dock | when a window is maximized or fullscreen on the dock's screen (undergoing testing) |
-| Attention bounce, Force Close | yes | no: Wayland tells clients neither urgency nor other windows' PIDs |
-| Global hotkeys | yes | no: bind a key in your compositor to `dokku --launcher` |
-| Frosted glass | yes (picom) | not yet |
-
-On Wayland, windows are listed through the `wlr-foreign-toplevel-management` protocol,
-which sway, labwc, Wayfire and Hyprland provide. Dokku asks for it on a connection of its
-own; where the compositor lacks it, the features above are turned off and Settings says
-why. Dodge can only react to maximized and fullscreen windows there, because the
-protocol does not say where a window is.
-
-**X11 is the best-tested session; Wayland support is still maturing.** The dock, its
-popups and tooltips, folders, drag and drop, themes, the launcher and Settings work on
-both. Wayland has been checked in nested sway and labwc (labwc is XFCE's Wayland
-compositor): the media widget, notification badges, vertical and right-hand docks,
-several monitors (including plugging one in and out) and window tracking. It has also
-been run in a real sway session on NVIDIA hardware: the dock, running indicators,
-launcher, app launching and drag reordering work there. The media widget, badges and
-dodge have only been tried nested, and a full XFCE Wayland session is untested, so
-expect rough edges and please report them.
-
-On Wayland the compositor must support the `wlr-layer-shell` protocol. sway, labwc,
-Wayfire, Hyprland and KDE Plasma do. GNOME's Mutter does not, so Dokku can't place
-its dock there.
-
-## Usage
+### Usage
 
 ```
 dokku                # start the dock
@@ -193,16 +117,60 @@ dokku --settings     # open the settings window
 dokku --version      # print the version
 ```
 
-Configuration lives in `~/.config/dokku/`. See `man dokku` for the config
-format, theme format and file locations. User themes go in
-`~/.local/share/dokku/themes/`.
+## Screenshots
 
-## Plugins
+The dock:
 
-Settings, Behavior, Dock Items lists the plugins. **Clock**, **Battery** and **Volume** come with
-Dokku and are off until you switch them on. The battery widget hides itself on a machine without
-a battery. The volume widget uses `wpctl` (PipeWire) or `pactl` (PulseAudio): click mutes and
-scroll changes the volume.
+<p align="center">
+  <img src="screenshots/dock.png" alt="The dock" width="640">
+</p>
+
+The launcher, and its search box doing a calculation:
+
+<p align="center">
+  <img src="screenshots/launcher.png" alt="The app launcher" width="480">
+</p>
+
+<p align="center">
+  <img src="screenshots/launcher-calc.png" alt="A calculation in the launcher search" width="640">
+</p>
+
+## Documentation
+
+`man dokku` covers the config file, the theme format and where files live. The rest is below.
+
+### Files
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/dokku/config.ini` | settings, pinned apps, folders, enabled plugins |
+| `~/.local/share/dokku/themes/` | themes you install |
+| `~/.local/share/dokku/plugins/` | your script plugins |
+
+### X11 and Wayland
+
+Dokku checks which session it's in when it starts. Anything that needs X11 is turned off on
+Wayland, and Settings says why next to each option.
+
+| Feature | X11 | Wayland |
+|---------|-----|---------|
+| Dock, magnification, folders, drag and drop, themes, launcher, Settings | yes | yes |
+| Media widget, notification badges | yes | yes |
+| Running-app indicators, window list, focus and close | yes | needs `wlr-foreign-toplevel-management` |
+| Show Desktop button | yes | needs a compositor that lets clients minimize (labwc does, sway doesn't) |
+| Dodge windows | yes | only for maximized or fullscreen windows |
+| Attention bounce, Force Close | yes | no |
+| Global hotkeys | yes | no, bind a key to `dokku --launcher` in your compositor |
+| Frosted glass | yes (picom) | not yet |
+
+sway, labwc, Wayfire and Hyprland provide `wlr-foreign-toplevel-management`.
+
+### Plugins
+
+Settings, Behavior, Dock Items lists the plugins. **Clock**, **Battery** and **Volume** come
+with Dokku and are off until you turn them on. The battery widget should remain hidden on a machine
+without a battery. The volume widget uses `wpctl` (PipeWire) or `pactl` (PulseAudio): click
+mutes, scroll changes the volume.
 
 To write your own, put a folder with a `plugin.ini` in `~/.local/share/dokku/plugins/`, or
 install a `.zip` of it from Settings. A widget shows text on its icon:
@@ -226,28 +194,27 @@ hide_when_empty=true        # no output: take no room on the dock
 default_enabled=false       # start switched off
 ```
 
-A plugin of yours with the same `id` as one that ships with Dokku replaces it. When running
-from a source tree, `DOKKU_PLUGIN_DIR=data/plugins ./build/src/dokku` loads the bundled ones.
+A plugin with the same `id` as one that ships with Dokku replaces it. From a source tree,
+`DOKKU_PLUGIN_DIR=data/plugins ./build/src/dokku` loads the bundled ones.
 
-## Compositor notes
+### Compositor notes
 
-Frosted glass needs a compositor with blur support. Dokku sets these X11
-properties so compositor rules can target its windows:
+Frosted glass needs a compositor that can blur. Dokku sets these X11 properties so you can
+write compositor rules for its windows:
 
-- `_DOKKU_WINDOW` on every Dokku window (dock, blur backdrop, launcher, settings):
-  use it to disable blur and shadow for Dokku by default.
-- `_DOKKU_BLUR` on the capsule-shaped backdrop window only: enable blur for
-  windows matching both `_DOKKU_WINDOW` and `_DOKKU_BLUR`.
+- `_DOKKU_WINDOW` is on every Dokku window (dock, blur backdrop, launcher, settings). Use it to
+  turn blur and shadow off for Dokku by default.
+- `_DOKKU_BLUR` is only on the capsule-shaped backdrop window. Turn blur on for windows that
+  match both `_DOKKU_WINDOW` and `_DOKKU_BLUR`.
 
-`_COMPTON_SHADOW` is set to 0 so picom draws no shadow.
+`_COMPTON_SHADOW` is set to 0, so picom draws no shadow.
 
 **picom blurs every window once `blur-method` is set.** In picom v13, setting `blur-method`
-(for example `dual_kawase`) turns background blur on for all windows by default, not only
-the ones your rules name. Menus and other popups are windows with a transparent margin
-around them (room for their shadow), and the blur covers the whole window, margin
-included, so each menu gets a blurred box around it. The `xrender` backend does not
-support `dual_kawase`, so it blurs nothing and shows no box, which is why the problem
-appears only with the GL backends. Keep blur for the dock and switch it off for menus:
+(`dual_kawase`, for example) turns background blur on for all windows, not just the ones your
+rules name. Menus and popups are windows with a transparent margin for their shadow, and the
+blur covers the whole window including that margin, so each menu gets a blurred box around it.
+The `xrender` backend can't do `dual_kawase`, so it blurs nothing and shows no box. That's why
+you only see this with the GL backends. To keep blur on the dock and off menus:
 
 ```
 rules: ({
@@ -259,13 +226,13 @@ rules: ({
 }, ...)
 ```
 
-To blur only the dock's backdrop, put a first rule `{ match = "!_DOKKU_BLUR@"; blur-background = false; }`
-instead.
+To blur only the dock's backdrop, use a first rule
+`{ match = "!_DOKKU_BLUR@"; blur-background = false; }` instead.
 
-**picom and the launcher fade:** on X11 the launcher fades in and out by changing the
-window's `_NET_WM_WINDOW_OPACITY`, so the compositor does the blending. If picom has
-`fading = true`, it also smooths those changes at its own pace, and the launcher
-fades slowly and then pops out. Turn picom's fade off for Dokku windows with a rule:
+**picom and the launcher fade:** on X11 the launcher fades by changing the window's
+`_NET_WM_WINDOW_OPACITY`, so the compositor does the blending. If picom has `fading = true`, it
+smooths those changes at its own pace, and the launcher fades slowly and then pops out. Turn
+picom's fade off for Dokku windows:
 
 ```
 rules: ({
@@ -276,36 +243,9 @@ rules: ({
 }, ...)
 ```
 
-## Project layout
-
-| Path | Contents |
-|------|----------|
-| `src/main.vala` | entry point |
-| `lib/core/` | application, D-Bus service |
-| `lib/dock/` | dock window, renderer, app/window/config managers, monitors |
-| `lib/launcher/` | full-screen launcher, usage tracking |
-| `lib/settings/` | settings window |
-| `lib/plugins/` | plugin interface and built-in plugins |
-| `lib/themes/` | theme loading |
-| `lib/hotkeys/` | hotkey manager |
-| `data/` | desktop files, man page, icon |
-
-## Troubleshooting
-
-- **No album art in the media widget:** install `gvfs-backends` (see Build).
-- **Trash plugin does nothing:** it runs `gio trash`; install `libglib2.0-bin`.
-- **The dock doesn't appear on Wayland:** your compositor needs `wlr-layer-shell`
-  (see above). GNOME's Mutter doesn't provide it.
-- **Frosted glass has no effect:** it needs a compositor with blur support. See
-  the compositor notes above.
-- **Dock doesn't appear at login:** see the autostart note under Install.
-- **Something looks wrong after an upgrade:** restart the dock. A running dock
-  keeps using the old binary until it is restarted.
-
 ## Contributing
 
-Issues and pull requests are welcome at
-<https://github.com/yarisgutierrez/Dokku>.
+Issues and pull requests are welcome at <https://github.com/yarisgutierrez/Dokku>.
 
 ## License
 

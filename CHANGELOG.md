@@ -16,6 +16,7 @@ All notable changes to Dokku are listed here. The format follows
 - **The Applications menu entry uses the full path to `dokku`**, so it launches when the install
   prefix (such as `~/.local/bin`) isn't on the PATH a desktop uses for menu items. The autostart
   entry is only installed under `/etc/xdg`, where desktops read it, and not for other prefixes.
+- **The README is reorganized**, with the install steps and requirements near the top.
 
 ## [0.3.1] - 2026-10-15
 
