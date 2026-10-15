@@ -6,6 +6,8 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-15
+
 ### Added
 - **`install.sh`.** Builds and installs Dokku in one step: for your user under `~/.local` by
   default, `--global` for `/usr/local`, or `--prefix DIR` for anywhere else. It refreshes the
@@ -291,7 +293,8 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
-[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...v0.2.1
