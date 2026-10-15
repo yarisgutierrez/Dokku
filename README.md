@@ -157,8 +157,8 @@ window shows why next to each one.
 | Dock, magnification, folders, drag and drop, themes | yes | yes (layer-shell) |
 | Launcher, Settings | yes | yes |
 | Media widget, notification badges (both use D-Bus) | yes | yes (undergoing testing) |
-| Running-app indicators, window list, focus and close | yes | yes, if the compositor has `wlr-foreign-toplevel-management` (undergoing testing) |
-| Show Desktop button | yes | yes, if the compositor lets clients minimize windows (labwc does; sway does not) (undergoing testing) |
+| Running-app indicators, window list, focus and close | yes | yes, if the compositor has `wlr-foreign-toplevel-management` |
+| Show Desktop button | yes | yes, if the compositor lets clients minimize windows (labwc does; sway does not) |
 | Dodge windows | when a window overlaps the dock | when a window is maximized or fullscreen on the dock's screen (undergoing testing) |
 | Attention bounce, Force Close | yes | no: Wayland tells clients neither urgency nor other windows' PIDs |
 | Global hotkeys | yes | no: bind a key in your compositor to `dokku --launcher` |
@@ -170,13 +170,15 @@ own; where the compositor lacks it, the features above are turned off and Settin
 why. Dodge can only react to maximized and fullscreen windows there, because the
 protocol does not say where a window is.
 
-**X11 is the well-tested session; Wayland support is undergoing testing.** The dock, its
+**X11 is the best-tested session; Wayland support is still maturing.** The dock, its
 popups and tooltips, folders, drag and drop, themes, the launcher and Settings work on
 both. Wayland has been checked in nested sway and labwc (labwc is XFCE's Wayland
 compositor): the media widget, notification badges, vertical and right-hand docks,
-several monitors (including plugging one in and out) and window tracking. Testing on
-real hardware and in a full XFCE Wayland session is still under way, so expect rough
-edges there and please report them.
+several monitors (including plugging one in and out) and window tracking. It has also
+been run in a real sway session on NVIDIA hardware: the dock, running indicators,
+launcher, app launching and drag reordering work there. The media widget, badges and
+dodge have only been tried nested, and a full XFCE Wayland session is untested, so
+expect rough edges and please report them.
 
 On Wayland the compositor must support the `wlr-layer-shell` protocol. sway, labwc,
 Wayfire, Hyprland and KDE Plasma do. GNOME's Mutter does not, so Dokku can't place
