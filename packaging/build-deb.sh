@@ -65,7 +65,7 @@ Suggests: picom
 Section: x11
 Priority: optional
 Homepage: https://github.com/yarisgutierrez/Dokku
-Description: dock and app launcher for XFCE4 (X11 and Wayland)
+Description: dock and app launcher for Linux
  Dokku is a macOS-style dock with magnification, running-app indicators,
  folders, window previews, a media widget and a full-screen app launcher
  with search. It works on X11 and, with a compositor that offers
