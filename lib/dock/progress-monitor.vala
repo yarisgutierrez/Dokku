@@ -134,7 +134,7 @@ namespace Dokku {
         }
 
         private void on_wnck_window_opened(Wnck.Window window) {
-            // Listen for title changes — window name may not be set yet at open time
+            // Listen for title changes: window name may not be set yet at open time
             ulong handler = window.name_changed.connect(() => {
                 try_classify_progress_window(window);
             });
@@ -164,7 +164,7 @@ namespace Dokku {
         }
 
         private void try_classify_progress_window(Wnck.Window window) {
-            // Already tracked — don't re-evaluate
+            // Already tracked: don't re-evaluate
             if (progress_windows.contains(window)) return;
 
             if (!looks_like_progress_window(window)) return;

@@ -252,7 +252,7 @@ namespace Dokku {
 
             // Notification badge (macOS-style red badge overlapping top-right of icon)
             if (item.notification_count > 0) {
-                // Compute badge text fresh from the int value each frame — avoids
+                // Compute badge text fresh from the int value each frame: avoids
                 // any stale/corrupt cached string in the GObject property
                 int badge_count = item.notification_count;
                 string badge_text = badge_count > 9 ? "9+" : badge_count.to_string();

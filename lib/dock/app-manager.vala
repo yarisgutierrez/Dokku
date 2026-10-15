@@ -21,11 +21,11 @@ namespace Dokku {
         // StartupWMClass: what the app's windows call themselves when that differs from the id
         public string wm_class_lower { get; set; default = ""; }
 
-        // Set to true when NoDisplay=true — these apps should not appear in the launcher
+        // Set to true when NoDisplay=true: these apps should not appear in the launcher
         public bool no_display { get; set; default = false; }
 
         // Lazily initialized category map. Thread-safe because all callers
-        // run on the main GTK thread (from load_applications → from_desktop_file).
+        // run on the main GTK thread (from load_applications -> from_desktop_file).
         private static HashTable<string, string>? _category_map = null;
 
         private static unowned HashTable<string, string> get_category_map() {
@@ -188,7 +188,7 @@ namespace Dokku {
                     wm_class_lower = keyfile.get_string("Desktop Entry", "StartupWMClass").down();
                 }
 
-                // Read NoDisplay in the same KeyFile pass — avoids a second file open
+                // Read NoDisplay in the same KeyFile pass: avoids a second file open
                 if (keyfile.has_key("Desktop Entry", "NoDisplay")) {
                     no_display = keyfile.get_boolean("Desktop Entry", "NoDisplay");
                 }

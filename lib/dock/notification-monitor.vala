@@ -29,11 +29,11 @@ namespace Dokku {
                 );
 
                 // Register filter BEFORE BecomeMonitor so no messages are missed.
-                // The filter runs in GDBus's worker thread — only read immutable
+                // The filter runs in GDBus's worker thread: only read immutable
                 // Variant data there, defer everything else to the main thread.
                 filter_id = monitor_bus.add_filter(on_message);
 
-                // Build BecomeMonitor args: (asu) — match rules + flags
+                // Build BecomeMonitor args: (asu), match rules + flags
                 var rules_builder = new VariantBuilder(new VariantType("as"));
                 rules_builder.add("s",
                     "type='method_call',interface='org.freedesktop.Notifications',member='Notify'");
@@ -74,7 +74,7 @@ namespace Dokku {
             }
         }
 
-        // Called in GDBus WORKER THREAD — must not access non-thread-safe state.
+        // Called in GDBus WORKER THREAD: must not access non-thread-safe state.
         // Only read immutable Variant data here; dispatch processing to main thread.
         private DBusMessage? on_message(DBusConnection conn,
                                          owned DBusMessage message,
@@ -86,7 +86,7 @@ namespace Dokku {
             if (message.get_message_type() != DBusMessageType.METHOD_CALL)
                 return message;
 
-            // Extract data from the Notify call (Variants are immutable — thread-safe)
+            // Extract data from the Notify call (Variants are immutable: thread-safe)
             string? iface = message.get_interface();
             string? member = message.get_member();
 
@@ -115,16 +115,16 @@ namespace Dokku {
 
             // CRITICAL: Return null for ALL method calls. This prevents GLib from
             // dispatching to (non-existent) object handlers and sending an
-            // UnknownMethod error reply — which would fail on the monitor-only
+            // UnknownMethod error reply, which would fail on the monitor-only
             // connection and silently close it.
             return null;
         }
 
-        // Called on the MAIN THREAD via Idle.add — safe to access all state.
+        // Called on the MAIN THREAD via Idle.add: safe to access all state.
         private void process_notification(string? desktop_entry, string app_name) {
             string? matched_id = null;
 
-            // Try desktop-entry hint first (most reliable — maps to .desktop file ID)
+            // Try desktop-entry hint first (most reliable: maps to .desktop file ID)
             if (desktop_entry != null && desktop_entry != "") {
                 var app = app_manager.get_app(desktop_entry);
                 if (app == null) app = app_manager.find_by_name(desktop_entry);

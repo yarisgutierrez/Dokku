@@ -528,7 +528,7 @@ namespace Dokku {
             return shown;
         }
 
-        // Full rebuild of all pages (no animation — used on search/init)
+        // Full rebuild of all pages (no animation: used on search/init)
         private void rebuild_pages() {
             // Remove all existing pages
             page_stack.foreach((w) => page_stack.remove(w));
@@ -1204,8 +1204,8 @@ namespace Dokku {
         private void show_folder_preview(Gtk.Widget btn) {
             btn.get_style_context().add_class("folder-forming");
             // Two-phase pop animation:
-            //   Phase 1 (0–55%): smooth rise from dim to full (the "reveal")
-            //   Phase 2 (55–100%): gentle bounce dip then settle (the "pop")
+            //   Phase 1 (0-55%): smooth rise from dim to full (the "reveal")
+            //   Phase 2 (55-100%): gentle bounce dip then settle (the "pop")
             btn.opacity = 0.3;
             int64 start = GLib.get_monotonic_time();
             btn.add_tick_callback((widget, clock) => {
@@ -1216,7 +1216,7 @@ namespace Dokku {
                     // Phase 1: ease-out cubic rise
                     widget.opacity = 0.3 + 0.7 * UiUtil.ease_out_cubic(t / 0.55);
                 } else {
-                    // Phase 2: sine bounce — dips to ~0.92 then recovers
+                    // Phase 2: sine bounce, dips to ~0.92 then recovers
                     double p = (t - 0.55) / 0.45;
                     double bounce = Math.sin(p * Math.PI) * 0.09;
                     widget.opacity = 1.0 - bounce;

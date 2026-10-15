@@ -12,17 +12,17 @@ namespace Dokku {
      *
      * Solution: Use a SEPARATE transparent popup window (the backdrop) positioned
      * behind the main dock at the capsule location. This window:
-     * - Has _DOKKU_BLUR atom → picom blurs behind it
+     * - Has _DOKKU_BLUR atom -> picom blurs behind it
      * - Has a rounded-rect bounding shape matching the capsule
-     * - Is transparent → blurred desktop shows through
+     * - Is transparent -> blurred desktop shows through
      *
      * The main dock window has NO bounding shape and NO blur atom, so:
      * - Magnified icons extend freely (no clipping)
      * - Picom does NOT blur behind the main dock
      * - The semi-transparent dock background lets the blurred desktop
-     *   (from the backdrop below) show through → frosted glass effect
+     *   (from the backdrop below) show through -> frosted glass effect
      *
-     * Compositing order: desktop → blur (capsule area) → backdrop → main dock
+     * Compositing order: desktop -> blur (capsule area) -> backdrop -> main dock
      */
     public class BlurBackdrop : GLib.Object {
         private Gtk.Window dock;
@@ -80,7 +80,7 @@ namespace Dokku {
             window.set_type_hint(Gdk.WindowTypeHint.DOCK);
 
             window.draw.connect((cr) => {
-                // Transparent — compositor blur shows through this window.
+                // Transparent: compositor blur shows through this window.
                 UiUtil.clear(cr);
                 return true;
             });
@@ -183,7 +183,7 @@ namespace Dokku {
             bg_w = int.max(bg_w, 1);
             bg_h = int.max(bg_h, 1);
 
-            // Only call resize/move if values actually changed — avoids
+            // Only call resize/move if values actually changed: avoids
             // recreating the X11 bounding shape 60 times/sec during hover
             int cur_w = window.get_allocated_width();
             int cur_h = window.get_allocated_height();

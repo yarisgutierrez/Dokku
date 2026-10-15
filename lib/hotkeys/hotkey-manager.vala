@@ -61,7 +61,7 @@ namespace Dokku {
                 return Gdk.FilterReturn.CONTINUE;
             }
 
-            // Use cached hotkey — avoids KeyFile lookup on every key event.
+            // Use cached hotkey: avoids KeyFile lookup on every key event.
             // Cache is refreshed in reload_hotkeys().
             if (cached_super_target == 0) {
                 return Gdk.FilterReturn.CONTINUE;
@@ -72,7 +72,7 @@ namespace Dokku {
                     super_press_time = GLib.get_monotonic_time();
                     super_other_key = false;
                 } else if (super_press_time > 0) {
-                    // Another key pressed while Super held — not a bare tap
+                    // Another key pressed while Super held: not a bare tap
                     super_other_key = true;
                 }
             } else if (xevent->type == X.EventType.KeyRelease) {
@@ -80,7 +80,7 @@ namespace Dokku {
                     int64 hold = GLib.get_monotonic_time() - super_press_time;
                     super_press_time = 0;
                     if (!super_other_key && hold < SUPER_TAP_THRESHOLD_US) {
-                        // Short tap, no combo — toggle launcher from idle
+                        // Short tap, no combo: toggle launcher from idle
                         // to avoid reentrancy with X event processing
                         Idle.add(() => {
                             launcher_toggle_requested();
@@ -151,7 +151,7 @@ namespace Dokku {
             } else if (launcher_hotkey == "Super_R") {
                 cached_super_target = super_r_keycode;
             } else {
-                cached_super_target = 0;  // not a bare Super key — filter skips
+                cached_super_target = 0;  // not a bare Super key: filter skips
             }
             if (launcher_hotkey != "") {
                 string kb_str = to_keybinder_format(launcher_hotkey);
@@ -192,7 +192,7 @@ namespace Dokku {
 
         private void handle_launcher_hotkey() {
             // Super_L / Super_R toggle is handled entirely by the X11 root
-            // filter (press/release timing) — the keybinder callback is
+            // filter (press/release timing): the keybinder callback is
             // ignored so the action fires exactly once per physical tap.
             if (cached_super_target != 0) {
                 return;

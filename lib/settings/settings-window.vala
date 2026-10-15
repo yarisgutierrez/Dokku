@@ -983,7 +983,7 @@ namespace Dokku {
         private string resolve_entry_text(string text) {
             string trimmed = text.strip();
             if (trimmed == "") return "";
-            // Absolute path — store as-is
+            // Absolute path: store as-is
             if (trimmed.has_prefix("/")) return trimmed;
             // Try to find by display name
             var app = app_manager.find_by_name(trimmed);

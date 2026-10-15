@@ -99,7 +99,7 @@ namespace Dokku {
                 FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
             FileInfo? info;
             while ((info = enumerator.next_file(null)) != null) {
-                // Reject symlinks outright — they could point outside the prefix
+                // Reject symlinks outright: they could point outside the prefix
                 if (info.get_file_type() == FileType.SYMBOLIC_LINK) {
                     return false;
                 }

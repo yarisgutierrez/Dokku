@@ -17,7 +17,7 @@ namespace Dokku {
         }
 
         public void show(DockItem item) {
-            var dialog = new Gtk.Dialog.with_buttons("Properties — " + item.name, parent,
+            var dialog = new Gtk.Dialog.with_buttons("Properties: " + item.name, parent,
                 Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
                 null);
             dialog.set_default_size(400, -1);

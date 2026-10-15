@@ -108,7 +108,7 @@ namespace Dokku {
                 // Anchors set after dock_position is loaded (below)
             }
 
-            // Always set these — DOCK type hint tells the WM and compositor
+            // Always set these: DOCK type hint tells the WM and compositor
             // this is a dock (no decorations, no focus stealing, no taskbar)
             set_type_hint(Gdk.WindowTypeHint.DOCK);
             set_decorated(false);
@@ -152,7 +152,7 @@ namespace Dokku {
                        Gdk.EventMask.SCROLL_MASK |
                        Gdk.EventMask.SMOOTH_SCROLL_MASK);
 
-            // Enable drag-and-drop for .desktop files (no HIGHLIGHT — we draw our own indicator)
+            // Enable drag-and-drop for .desktop files (no HIGHLIGHT: we draw our own indicator)
             Gtk.drag_dest_set(this, 0, DROP_TARGETS, Gdk.DragAction.COPY);
             drag_data_received.connect(on_drag_data_received);
             drag_drop.connect(on_drag_drop);
@@ -367,7 +367,7 @@ namespace Dokku {
                 if (sep != null) items.append(new DockItem.from_plugin(sep));
             }
 
-            // Media widget — inserted right after separator
+            // Media widget: inserted right after separator
             if (config.get_media_widget() && config.get_plugin_enabled("media-player")) {
                 var media = plugin_manager.get_plugin("media-player") as MediaPlugin;
                 if (media != null) {
@@ -713,7 +713,7 @@ namespace Dokku {
                 // Skip non-application windows (desktop, docks, panels, menus)
                 if (!window.is_application_window) continue;
 
-                // Skip minimized windows — not visible on screen
+                // Skip minimized windows: not visible on screen
                 if (window.is_minimized) continue;
 
                 // Skip Dokku's own windows
@@ -722,7 +722,7 @@ namespace Dokku {
                 // Check if window is on the same monitor
                 if (!window.is_on_monitor(mon_geo)) continue;
 
-                // Maximized or fullscreen window on this monitor → dodge. This is all
+                // Maximized or fullscreen window on this monitor -> dodge. This is all
                 // Wayland can tell us: it doesn't report where a window is.
                 if (window.is_maximized || window.is_fullscreen) {
                     set_dodge_hiding(true);
@@ -823,7 +823,7 @@ namespace Dokku {
             foreach (var item in to_remove) items.remove(item);
 
             // Bounce any app that just became running (newly launched)
-            // Skip on initial load — these apps were already running before the dock started
+            // Skip on initial load: these apps were already running before the dock started
             if (initial_load_done) {
                 foreach (var item in items) {
                     if (item.running && !was_running.contains(item.id)) {
@@ -862,7 +862,7 @@ namespace Dokku {
 
             compute_layout(container, layout_scales, out dock_dim);
 
-            // Sync blur background to the current dock_dim — this makes the
+            // Sync blur background to the current dock_dim: this makes the
             // blur area grow/shrink dynamically during magnification and
             // immediately reflect item add/remove without waiting for a
             // full reposition cycle.
@@ -992,7 +992,7 @@ namespace Dokku {
 
             bool light = is_light_theme();
 
-            // Outer shadow — soft dark glow behind the dock for depth
+            // Outer shadow: soft dark glow behind the dock for depth
             if (radius > 0) {
                 double shadow_alpha = light ? 0.10 : 0.20;
                 DockRenderer.draw_rounded_rect(cr, x - 1, y + 1, w + 2, h + 1, radius + 2);
@@ -1128,7 +1128,7 @@ namespace Dokku {
             double pos = start_pos;
             double gap_width = renderer.spacing * 2;
             double mouse_coord = along(mouse_x, mouse_y);
-            // Compute once outside the loop — this value is invariant per frame
+            // Compute once outside the loop: this value is invariant per frame
             int active_gap_index = drop_insert_index >= 0 ? drop_insert_index :
                 (is_reordering && !drag_removing ? reorder_insert_index : -1);
             int i = 0;
@@ -1276,7 +1276,7 @@ namespace Dokku {
                         drag_float.move_to(event.x_root, event.y_root);
                     }
                 } else {
-                    // Back on dock — destroy popup and resume normal reorder
+                    // Back on dock: destroy popup and resume normal reorder
                     drag_float.destroy();
                     reorder_insert_index = get_insert_index(main_coord);
                 }
@@ -1335,7 +1335,7 @@ namespace Dokku {
 
         private bool on_leave(Gdk.EventCrossing event) {
             // During a pointer-grabbed reorder the cursor leaves the window
-            // geometry but we keep getting events — don't reset anything.
+            // geometry but we keep getting events: don't reset anything.
             if (is_reordering) {
                 return true;
             }
@@ -1599,7 +1599,7 @@ namespace Dokku {
             double pos = rest_origin(gap_open ? gap_width : 0);
             int i = 0;
             foreach (var item in items) {
-                // Cursor within existing gap → keep current index (prevents jitter)
+                // Cursor within existing gap -> keep current index (prevents jitter)
                 if (gap_open && i == drop_insert_index) {
                     if (x < pos + gap_width) return i;
                     pos += gap_width;
@@ -2139,11 +2139,11 @@ namespace Dokku {
             }
 
             if (!auto_hide && !dodge_hiding && hidden) {
-                // Nothing requires hiding — show dock
+                // Nothing requires hiding: show dock
                 hidden = false;
                 dock_slide_offset = 0.0;
             } else if (auto_hide && !hovering && !hidden) {
-                // Auto-hide just enabled — hide immediately
+                // Auto-hide just enabled: hide immediately
                 set_hidden(true);
             }
 
@@ -2161,7 +2161,7 @@ namespace Dokku {
             // ProgressMonitor is kept alive across reloads (no settings dependency,
             // and recreating would leak Wnck signal connections)
 
-            // Restore running app state — suppress bounces since this is a reload, not new launches
+            // Restore running app state: suppress bounces since this is a reload, not new launches
             bool was_initial = initial_load_done;
             initial_load_done = false;
             update_running_apps();
@@ -2195,7 +2195,7 @@ namespace Dokku {
             if (is_launch && !config.get_launch_bounce()) return;
 
             // For notification/attention bounces, don't bounce if the app is already focused.
-            // For launch bounces, always bounce (the app just started — user needs feedback).
+            // For launch bounces, always bounce (the app just started: user needs feedback).
             if (!is_launch && active_app_id() == app_id) return;
 
             // Per-app cooldown: suppress repeated bounces within 5 seconds

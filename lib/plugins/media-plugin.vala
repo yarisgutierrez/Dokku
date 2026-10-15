@@ -491,7 +491,7 @@ namespace Dokku {
             if (!_has_media) return null;
             var menu = new Gtk.Menu();
             // Track info (disabled, informational)
-            var info = new Gtk.MenuItem.with_label(track_title + " — " + track_artist);
+            var info = new Gtk.MenuItem.with_label(track_title + " - " + track_artist);
             info.sensitive = false;
             menu.append(info);
             menu.append(new Gtk.SeparatorMenuItem());
