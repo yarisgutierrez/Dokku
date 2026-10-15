@@ -1,5 +1,5 @@
 project('dokku', 'vala', 'c',
-  version: '0.3.0',
+  version: '0.3.1',
   meson_version: '>= 0.53.0',
   # A dock stays resident, so build it small by default: -Os costs no measurable speed
   # here (the drawing time is in GTK and Cairo) and trims about a fifth off the binary,

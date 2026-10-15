@@ -6,6 +6,8 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-15
+
 ### Changed
 - **Lower idle memory.** The launcher and Settings windows are now built the first time they
   are opened, not at startup, and the launcher fills its pages only while it is on screen.
@@ -30,6 +32,11 @@ All notable changes to Dokku are listed here. The format follows
 - The icon preview in Properties shows icons given as a file path.
 - Without an XDG applications menu, the launcher can group apps by category again (only
   Accessories and Other were decided correctly).
+
+### Documentation
+- The README now records that the dock, running indicators, launcher, app launching and drag
+  reordering were checked in a real sway session on NVIDIA hardware. Show Desktop does nothing
+  on sway, which ignores minimize requests from clients.
 
 ### Removed
 - `DOKKU_TIMING=1` and the launcher timing log, added in 0.3.0 to chase the cold-click lag
@@ -254,7 +261,8 @@ All notable changes to Dokku are listed here. The format follows
   used.
 - Debug lines printed at startup.
 
-[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/yarisgutierrez/Dokku/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yarisgutierrez/Dokku/releases/tag/v0.2.0
