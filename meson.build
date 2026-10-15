@@ -50,7 +50,7 @@ if atspi_dep.found()
   add_project_arguments('-D', 'HAVE_ATSPI', language: 'vala')
 endif
 
-add_project_arguments('-DWNCK_I_KNOW_THIS_IS_UNSTABLE', language: 'c')
+add_project_arguments('-DWNCK_I_KNOW_THIS_IS_UNSTABLE', '-D_DEFAULT_SOURCE', language: 'c')
 add_project_arguments('--vapidir', meson.current_source_dir() / 'vapi', language: 'vala')
 add_project_arguments('--pkg', 'posix', language: 'vala')
 add_project_arguments('--pkg', 'x11', language: 'vala')
