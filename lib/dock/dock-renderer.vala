@@ -242,12 +242,18 @@ namespace Dokku {
             }
 
             // Running indicator dots (dark dots on light themes, light dots on dark themes)
-            if (item.running) {
-                set_indicator_color(cr);
-                int dots = int.min((int) item.windows.length(), 3);
+            if (item.dot_fade > 0.001) {
+                set_indicator_color(cr, -1, item.dot_fade);
+                int dots = item.dots;
                 for (int i = 0; i < dots; i++) {
                     draw_indicator_dot(cr, x, y, size, position, (i - (dots - 1) / 2.0) * 5);
                 }
+            }
+
+            // An amber dot for an app with no window whose process is still alive
+            if (item.bg_fade > 0.001) {
+                cr.set_source_rgba(1.0, 0.70, 0.0, 0.95 * item.bg_fade);
+                draw_indicator_dot(cr, x, y, size, position);
             }
 
             // Notification badge (macOS-style red badge overlapping top-right of icon)
@@ -341,14 +347,15 @@ namespace Dokku {
 
         // The theme's indicator colour (running dots, drop gap), or a plain one that
         // suits the theme's brightness when there is no theme
-        public void set_indicator_color(Cairo.Context cr, double alpha = -1) {
+        // `fade` (0 to 1) scales the opacity, for an indicator easing in or out
+        public void set_indicator_color(Cairo.Context cr, double alpha = -1, double fade = 1.0) {
             if (theme != null) {
                 cr.set_source_rgba(theme.indicator_red, theme.indicator_green, theme.indicator_blue,
-                                   alpha >= 0 ? alpha : theme.indicator_alpha);
+                                   (alpha >= 0 ? alpha : theme.indicator_alpha) * fade);
             } else if (is_light_theme()) {
-                cr.set_source_rgba(0.12, 0.12, 0.14, alpha >= 0 ? alpha : 0.90);
+                cr.set_source_rgba(0.12, 0.12, 0.14, (alpha >= 0 ? alpha : 0.90) * fade);
             } else {
-                cr.set_source_rgba(1, 1, 1, alpha >= 0 ? alpha : 0.4);
+                cr.set_source_rgba(1, 1, 1, (alpha >= 0 ? alpha : 0.4) * fade);
             }
         }
 

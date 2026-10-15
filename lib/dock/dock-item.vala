@@ -6,6 +6,18 @@ namespace Dokku {
         public string desktop_file { get; set; }
         public bool pinned { get; set; default = false; }
         public bool running { get; set; default = false; }
+        // No window, but the app's process is still alive (a tray app whose window was closed)
+        public bool background { get; set; default = false; }
+        // Quit is in progress: its windows going away is not a reason to show the background dot
+        public bool quitting { get; set; default = false; }
+        // The app's process IDs, as last found; what the background check watches
+        public int[] pids = {};
+        // Indicator fade, 0 to 1: the running dots and the amber background dot ease in and
+        // out as `running` / `background` change. `dots` is how many windows the running
+        // dots showed last, kept so they can fade out after the windows are gone.
+        public double dot_fade = 0;
+        public double bg_fade = 0;
+        public int dots = 0;
         public bool is_launcher { get; set; default = false; }
         public bool is_plugin { get; set; default = false; }
         public bool is_widget { get; set; default = false; }

@@ -34,6 +34,7 @@ libdokku_sources = files(
   'dock/tracked-window.vala',
   'dock/window-manager.vala',
   'dock/app-quit.vala',
+  'dock/tray-icons.vala',
   'dock/app-manager.vala',
   'dock/menu-categories.vala',
   'dock/config-manager.vala',

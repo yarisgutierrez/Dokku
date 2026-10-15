@@ -772,6 +772,90 @@ namespace Dokku {
             }
         }
 
+        private const double INDICATOR_FADE_MS = 250;
+        private uint indicator_tick_id = 0;
+        private int64 indicator_last_us = 0;
+
+        private static double approach(double value, double target, double step) {
+            if (value < target) return double.min(target, value + step);
+            return double.max(target, value - step);
+        }
+
+        // Eases every item's indicator dots toward what they should show now: the running
+        // dots when it has windows, the amber dot when it lives on in the background. Runs
+        // on the frame clock and stops once everything has arrived.
+        private void start_indicator_fade() {
+            if (indicator_tick_id != 0) return;
+            indicator_last_us = 0;
+            indicator_tick_id = add_tick_callback((widget, frame_clock) => {
+                int64 now = frame_clock.get_frame_time();
+                double step = indicator_last_us == 0 ? 0.0
+                    : (now - indicator_last_us) / 1000.0 / INDICATOR_FADE_MS;
+                indicator_last_us = now;
+                bool moving = false;
+                foreach (var item in items) {
+                    if (item.is_plugin || item.is_launcher) continue;
+                    double dots_target = item.running ? 1.0 : 0.0;
+                    double bg_target = (item.background && !item.running) ? 1.0 : 0.0;
+                    item.dot_fade = approach(item.dot_fade, dots_target, step);
+                    item.bg_fade = approach(item.bg_fade, bg_target, step);
+                    if (item.dot_fade != dots_target || item.bg_fade != bg_target) moving = true;
+                }
+                queue_draw();
+                if (!moving) indicator_tick_id = 0;
+                return moving;
+            });
+        }
+
+        private const uint BACKGROUND_CHECK_MS = 200;
+        private uint background_poll_id = 0;
+
+        // An app has had no window for a moment: if its process is still alive and has a tray
+        // icon, the dock keeps showing it (amber dot) until it exits
+        private async void check_background(string id) {
+            foreach (var item in items) {
+                if (item.id != id || item.running || item.quitting || item.is_plugin || item.is_launcher) continue;
+                int[] alive = live_pids(item.pids);
+                if (alive.length == 0) alive = AppQuit.find_pids(item, new List<weak TrackedWindow>());
+                if (alive.length == 0) return;
+                // A daemon with no tray icon is not shown: only tray apps are worth a dot
+                bool tray = yield TrayIcons.owned_by(alive);
+                if (!tray || item.running || item.quitting || item.background) return;
+                item.pids = alive;
+                item.background = true;
+                start_indicator_fade();
+                if (background_poll_id == 0)
+                    background_poll_id = Timeout.add(500, poll_background);
+                schedule_redraw();
+                return;
+            }
+        }
+
+        private int[] live_pids(int[] pids) {
+            int[] alive = {};
+            foreach (var pid in pids) if (AppQuit.is_alive(pid)) alive += pid;
+            return alive;
+        }
+
+        // Ends the background state of apps whose process has gone; stops once none are left
+        private bool poll_background() {
+            bool any = false;
+            bool changed = false;
+            var gone = new List<DockItem>();
+            foreach (var item in items) {
+                if (!item.background) continue;
+                item.pids = live_pids(item.pids);
+                if (item.pids.length > 0) { any = true; continue; }
+                item.background = false;
+                changed = true;
+                if (!item.pinned) gone.append(item);
+            }
+            foreach (var item in gone) items.remove(item);
+            if (changed) { position_dock(); start_indicator_fade(); schedule_redraw(); }
+            if (!any) background_poll_id = 0;
+            return any;
+        }
+
         private void update_running_apps() {
             var windows = wm.get_windows();
 
@@ -786,6 +870,8 @@ namespace Dokku {
                     item.windows = new List<weak TrackedWindow>();
                 }
             }
+            // Hold the background state through this update: it ends when a window comes
+            // back or the process is gone, never merely because there is no window
 
             foreach (var window in windows) {
                 var app = app_manager.find_by_window(window);
@@ -796,6 +882,7 @@ namespace Dokku {
                     if (item.is_launcher || item.is_plugin) continue;
                     if (item.id == app.id) {
                         item.running = true;
+                        item.background = false;
                         item.windows.append(window);
                         found = true;
                         break;
@@ -815,9 +902,27 @@ namespace Dokku {
                 }
             }
 
+            // Remember each running app's processes; an app that just lost its last window
+            // is checked shortly for one that stays alive in the background
+            foreach (var item in items) {
+                if (item.is_plugin || item.is_launcher) continue;
+                if (item.running) {
+                    item.dots = int.min((int) item.windows.length(), 3);
+                    int[] found = {};
+                    foreach (var window in item.windows) {
+                        int pid = window.get_pid();
+                        if (pid > 1 && !(pid in found)) found += pid;
+                    }
+                    if (found.length > 0) item.pids = found;
+                } else if (was_running.contains(item.id)) {
+                    string id = item.id;
+                    Timeout.add(BACKGROUND_CHECK_MS, () => { check_background.begin(id); return false; });
+                }
+            }
+
             var to_remove = new List<DockItem>();
             foreach (var item in items) {
-                if (!item.pinned && !item.running && !item.is_plugin && !item.is_launcher)
+                if (!item.pinned && !item.running && !item.background && !item.is_plugin && !item.is_launcher)
                     to_remove.append(item);
             }
             foreach (var item in to_remove) items.remove(item);
@@ -832,9 +937,21 @@ namespace Dokku {
                 }
             } else {
                 initial_load_done = true;
+                // Apps already running when the dock starts show their dots at once
+                foreach (var item in items) {
+                    item.dot_fade = item.running ? 1.0 : 0.0;
+                    item.bg_fade = 0.0;
+                }
+                // Pinned apps already running hidden in the tray when the dock starts
+                foreach (var item in items) {
+                    if (item.running || item.is_plugin || item.is_launcher || !item.pinned) continue;
+                    string id = item.id;
+                    Timeout.add(BACKGROUND_CHECK_MS, () => { check_background.begin(id); return false; });
+                }
             }
 
             position_dock();
+            start_indicator_fade();
             schedule_redraw();
         }
 
@@ -1690,6 +1807,16 @@ namespace Dokku {
             usage_tracker.record_launch(item.id);
             app.launch();
             trigger_bounce(item.id, true);
+            watch_for_tray_start(item.id);
+        }
+
+        // An app that starts straight into the tray never opens a window, so the window list
+        // cannot say it is running. Look for it a few times while it starts up.
+        private void watch_for_tray_start(string id) {
+            uint[] delays = { 1000, 2500, 5000 };
+            foreach (var delay in delays) {
+                Timeout.add(delay, () => { check_background.begin(id); return false; });
+            }
         }
 
         // The scroll wheel: volume on the media widget, window switching on an app
@@ -2032,22 +2159,30 @@ namespace Dokku {
             options_mi.submenu = options;
             menu.append(options_mi);
 
-            if (!item.running || item.windows.length() == 0) return;
+            if (!item.running && !item.background) return;
             MenuUtil.add_separator(menu);
-            MenuUtil.add_item(menu, "Hide", () => {
-                foreach (var window in item.windows) {
-                    if (!window.is_minimized) window.minimize();
-                }
-            });
-            MenuUtil.add_item(menu, "Quit", () => AppQuit.quit.begin(item.id, item.windows));
+            if (item.running && item.windows.length() > 0) {
+                MenuUtil.add_item(menu, "Hide", () => {
+                    foreach (var window in item.windows) {
+                        if (!window.is_minimized) window.minimize();
+                    }
+                });
+                // Closes the windows only: an app with a tray icon keeps running
+                MenuUtil.add_item(menu, "Close Window", () => {
+                    var snapshot = new List<weak TrackedWindow>();
+                    foreach (var window in item.windows) snapshot.append(window);
+                    foreach (var window in snapshot) window.close();
+                });
+            }
+            MenuUtil.add_item(menu, "Quit", () => AppQuit.quit.begin(item));
 
-            // Force Close only shows when Shift is held as the menu opens. Wayland doesn't
-            // tell us another window's PID, so there it has nothing to kill.
-            if (shift_held && item.windows.nth_data(0).get_pid() > 0) {
+            // Force Close only shows when Shift is held as the menu opens. It ends the app's
+            // processes outright, found from the window PID or, where there is none (Wayland,
+            // or an app with no window), by name.
+            if (shift_held) {
                 MenuUtil.add_item(menu, "Force Close", () => {
-                    var window = item.windows.nth_data(0);
-                    if (window != null && window.get_pid() > 0) {
-                        Posix.kill(window.get_pid(), Posix.Signal.KILL);
+                    foreach (var pid in AppQuit.find_pids(item, item.windows)) {
+                        Posix.kill(pid, Posix.Signal.KILL);
                     }
                 });
             }

@@ -11,12 +11,30 @@ All notable changes to Dokku are listed here. The format follows
   default, `--global` for `/usr/local`, or `--prefix DIR` for anywhere else. It refreshes the
   icon and menu caches when those tools are installed.
 - **A new app icon.**
+- **Close Window and a background indicator.** The dock menu of a running app has Close Window
+  (closes its windows, leaving the app running) next to Quit. An app whose windows are gone but
+  whose process is alive and owns a tray icon, such as Spotify or Signal, stays in the dock with an
+  amber dot, and its menu offers Quit. Only apps with a system tray icon count; a background
+  daemon with no icon (such as Thunar's) gets no dot.
+- **Fading indicators.** The running dots and the amber background dot ease in and out over
+  a quarter of a second instead of appearing and vanishing. Apps already running when the dock
+  starts show their dots at once.
+- **Tray apps that start hidden.** An app that starts straight into the tray (Signal, for one)
+  is noticed after launch and when the dock starts, so it gets its amber dot and one click on
+  its icon opens the window.
 
 ### Changed
 - **The Applications menu entry uses the full path to `dokku`**, so it launches when the install
   prefix (such as `~/.local/bin`) isn't on the PATH a desktop uses for menu items. The autostart
   entry is only installed under `/etc/xdg`, where desktops read it, and not for other prefixes.
 - **The README is reorganized**, with the install steps and requirements near the top.
+- **Quit now ends the app.** An app that does not offer a D-Bus quit action gets a close request
+  on its windows and then SIGTERM once they are gone, so it no longer lingers in the tray. A
+  media player is asked to quit over MPRIS first, since Spotify ignores SIGTERM. Force Close
+  now works on Wayland and on an app with no window. Quit waits while a window is still open
+  (a "save changes?" prompt). On Wayland, where windows carry
+  no PID, the process is found by executable name; generic launchers such as `python3`, `java`
+  and `sh` are never matched.
 
 ## [0.3.1] - 2026-10-15
 
