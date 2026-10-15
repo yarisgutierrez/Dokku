@@ -10,6 +10,7 @@ All notable changes to Dokku are listed here. The format follows
 - **`install.sh`.** Builds and installs Dokku in one step: for your user under `~/.local` by
   default, `--global` for `/usr/local`, or `--prefix DIR` for anywhere else. It refreshes the
   icon and menu caches when those tools are installed.
+- **A new app icon.**
 
 ### Changed
 - **The Applications menu entry uses the full path to `dokku`**, so it launches when the install
