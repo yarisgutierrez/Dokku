@@ -6,6 +6,16 @@ All notable changes to Dokku are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **`install.sh`.** Builds and installs Dokku in one step: for your user under `~/.local` by
+  default, `--global` for `/usr/local`, or `--prefix DIR` for anywhere else. It refreshes the
+  icon and menu caches when those tools are installed.
+
+### Changed
+- **The Applications menu entry uses the full path to `dokku`**, so it launches when the install
+  prefix (such as `~/.local/bin`) isn't on the PATH a desktop uses for menu items. The autostart
+  entry is only installed under `/etc/xdg`, where desktops read it, and not for other prefixes.
+
 ## [0.3.1] - 2026-10-15
 
 ### Changed

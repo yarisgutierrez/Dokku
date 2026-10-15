@@ -30,7 +30,7 @@ jobs:
         run: ./build/src/dokku --version
 
       - name: Desktop files are valid
-        run: desktop-file-validate data/dokku.desktop data/dokku-autostart.desktop
+        run: desktop-file-validate build/dokku.desktop data/dokku-autostart.desktop
 
       - name: Build the .deb
         run: packaging/build-deb.sh dist

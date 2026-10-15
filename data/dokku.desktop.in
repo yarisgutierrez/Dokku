@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Dokku
+GenericName=Dock
+Comment=A fast, feature-rich dock built for Linux
+Exec=@BINDIR@/dokku
+Icon=dokku
+Terminal=false
+Categories=Utility;GTK;
+Keywords=dock;launcher;taskbar;panel;
+StartupNotify=false

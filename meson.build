@@ -63,13 +63,26 @@ if import('fs').exists('tests/meson.build')
   subdir('tests')
 endif
 
-install_data('data/dokku.desktop',
+# The Applications menu entry gets the full path to the binary, so it launches even when
+# the install prefix (~/.local, for one) is not on the PATH a desktop uses for menu items.
+desktop_entry = configure_file(
+  input: 'data/dokku.desktop.in',
+  output: 'dokku.desktop',
+  configuration: configuration_data({
+    'BINDIR': join_paths(get_option('prefix'), get_option('bindir')),
+  }),
+)
+install_data(desktop_entry,
   install_dir: join_paths(get_option('datadir'), 'applications')
 )
 
-install_data('data/dokku-autostart.desktop',
-  install_dir: join_paths(get_option('sysconfdir'), 'xdg/autostart')
-)
+# Desktops read autostart entries from /etc/xdg, so only install it there. With a
+# relative sysconfdir (--prefix=/usr/local or ~/.local) it would land where nothing looks.
+if get_option('sysconfdir').startswith('/')
+  install_data('data/dokku-autostart.desktop',
+    install_dir: join_paths(get_option('sysconfdir'), 'xdg/autostart')
+  )
+endif
 
 # Plugins that ship with Dokku: widgets for the clock, battery and volume, off until enabled
 install_subdir('data/plugins',
